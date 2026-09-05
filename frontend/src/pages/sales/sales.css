@@ -1,0 +1,275 @@
+.sales-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.sales-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sales-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.sales-back-link {
+  font-size: 0.9rem;
+  color: #2f6fed;
+  text-decoration: none;
+}
+
+.sales-back-link:hover {
+  text-decoration: underline;
+}
+
+.sales-card {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.sales-card h2 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+}
+
+.sales-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sales-stat {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.sales-stat .value {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #2f6fed;
+}
+
+.sales-stat .label {
+  font-size: 0.85rem;
+  color: #555;
+  margin-top: 0.25rem;
+}
+
+.sales-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sales-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.sales-table th,
+.sales-table td {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid #eee;
+}
+
+.sales-table th {
+  color: #666;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.sales-empty {
+  color: #777;
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+.sales-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: #1a1a1a;
+}
+
+.sales-btn:hover {
+  background: #f4f5f7;
+}
+
+.sales-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sales-btn-primary {
+  background: #2f6fed;
+  border-color: #2f6fed;
+  color: #fff;
+}
+
+.sales-btn-primary:hover {
+  background: #275cc4;
+}
+
+.sales-btn-danger {
+  background: #fff;
+  border-color: #e5b6b1;
+  color: #b3261e;
+}
+
+.sales-btn-danger:hover {
+  background: #fdecea;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.status-NEW,
+.status-DRAFT {
+  background: #eef1fb;
+  color: #2f6fed;
+}
+
+.status-IN_REVIEW {
+  background: #fff4e0;
+  color: #b3720a;
+}
+
+.status-QUOTED,
+.status-SUBMITTED {
+  background: #e6f6ec;
+  color: #1b8a4a;
+}
+
+.status-CANCELLED {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.tier-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #f0f0f0;
+  color: #444;
+}
+
+.qty-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.qty-control button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.qty-control input {
+  width: 48px;
+  text-align: center;
+  padding: 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.product-search-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.product-search-row input,
+.product-search-row select {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.product-search-row input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.warehouse-line {
+  font-size: 0.82rem;
+  color: #555;
+}
+
+.quote-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0;
+  font-size: 0.92rem;
+}
+
+.quote-summary-row.total {
+  font-weight: 700;
+  font-size: 1.05rem;
+  border-top: 1px solid #eee;
+  margin-top: 0.4rem;
+  padding-top: 0.6rem;
+}
+
+.banner-error {
+  background: #fdecea;
+  color: #b3261e;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.banner-success {
+  background: #e6f6ec;
+  color: #1b8a4a;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.recommendations-panel {
+  border: 1px dashed #ccc;
+  border-radius: 8px;
+  padding: 1.25rem;
+  text-align: center;
+  color: #888;
+  font-size: 0.85rem;
+}

@@ -1,0 +1,114 @@
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
+import { getCustomerRequest } from "../../api/customerRequests";
+import { createQuote } from "../../api/quotes";
+import type { CustomerRequestDetail as CustomerRequestDetailType } from "../../types/sales";
+import "./sales.css";
+
+function formatCurrency(amount: number) {
+  return `₹${amount.toLocaleString("en-IN")}`;
+}
+
+export function CustomerRequestDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [request, setRequest] = useState<CustomerRequestDetailType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    getCustomerRequest(id)
+      .then(setRequest)
+      .catch((err) => {
+        setError(
+          axios.isAxiosError(err) && err.response?.data?.message
+            ? err.response.data.message
+            : "Failed to load this customer request."
+        );
+      });
+  }, [id]);
+
+  async function handleCreateQuote() {
+    if (!id) return;
+    setError(null);
+    setIsCreating(true);
+    try {
+      const quote = await createQuote({ customerRequestId: id });
+      navigate(`/sales/quotes/${quote.id}`);
+    } catch (err) {
+      setError(
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "Failed to create quote from this request."
+      );
+      setIsCreating(false);
+    }
+  }
+
+  return (
+    <div className="sales-page">
+      <div className="sales-header">
+        <h1>Customer Request Details</h1>
+        <Link className="sales-back-link" to="/sales/customer-requests">
+          ← Back to customer requests
+        </Link>
+      </div>
+
+      {error && <div className="banner-error">{error}</div>}
+
+      {!request && !error && <p className="sales-empty">Loading...</p>}
+
+      {request && (
+        <>
+          <div className="sales-card">
+            <h2>Customer</h2>
+            <p>
+              <strong>{request.customer.name}</strong>{" "}
+              <span className="tier-badge">{request.customer.tier}</span>
+            </p>
+            <p>
+              Status: <span className={`status-badge status-${request.status}`}>{request.status}</span>
+            </p>
+            {request.notes && <p style={{ color: "#555" }}>Notes: {request.notes}</p>}
+          </div>
+
+          <div className="sales-card">
+            <h2>Requested Products</h2>
+            <table className="sales-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>SKU</th>
+                  <th>Selling Price</th>
+                  <th>Requested Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {request.items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.product.name}</td>
+                    <td>{item.product.sku}</td>
+                    <td>{formatCurrency(item.product.unitPrice)}</td>
+                    <td>{item.requestedQuantity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="sales-actions">
+            <button
+              className="sales-btn sales-btn-primary"
+              onClick={handleCreateQuote}
+              disabled={isCreating || request.status === "CANCELLED"}
+            >
+              {isCreating ? "Creating..." : "Create Quote"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
