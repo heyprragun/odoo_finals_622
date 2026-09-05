@@ -2,9 +2,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { SalesRepDashboard } from "./sales/SalesRepDashboard";
 import { SalesNav } from "./sales/SalesNav";
+import { CustomerNav } from "./customer/CustomerNav";
+import { CustomerDashboard } from "./customer/CustomerDashboard";
 
-// Roles that can reach the shared nav (Approvals in particular needs
-// Manager/Finance/Admin access, not just Sales Rep).
+// Roles that can reach the internal Sales Workspace nav (Approvals in
+// particular needs Manager/Finance/Admin access, not just Sales Rep).
 const NAV_ROLES = ["SALES_REP", "MANAGER", "FINANCE", "ADMIN"];
 
 export function Dashboard() {
@@ -19,6 +21,7 @@ export function Dashboard() {
   return (
     <div>
       {user && NAV_ROLES.includes(user.role) && <SalesNav />}
+      {user?.role === "CUSTOMER" && <CustomerNav />}
       <div
         style={{
           maxWidth: 960,
@@ -50,6 +53,8 @@ export function Dashboard() {
 
       {user && NAV_ROLES.includes(user.role) ? (
         <SalesRepDashboard />
+      ) : user?.role === "CUSTOMER" ? (
+        <CustomerDashboard />
       ) : (
         <div style={{ maxWidth: 480, margin: "4rem auto", textAlign: "center" }}>
           <h1>Welcome to DealFlow360</h1>

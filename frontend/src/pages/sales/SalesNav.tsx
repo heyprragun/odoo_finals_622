@@ -13,6 +13,7 @@ const TABS = [
   { label: "Deal Health", path: "/sales/deal-health" },
   { label: "Reports", path: "/sales/reports" },
   { label: "Product", path: "/sales/products" },
+  { label: "Discount Settings", path: "/sales/discount-settings" },
 ] as const;
 
 export function SalesNav() {

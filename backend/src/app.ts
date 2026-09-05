@@ -12,6 +12,9 @@ import approvalRoutes from "./routes/approval.routes";
 import subscriptionRoutes from "./routes/subscription.routes";
 import invoiceRoutes from "./routes/invoice.routes";
 import warehouseRoutes from "./routes/warehouse.routes";
+import governanceRoutes from "./routes/governance.routes";
+import customerPortalRoutes from "./routes/customerPortal.routes";
+import recommendationRoutes from "./routes/recommendation.routes";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -30,11 +33,14 @@ export function createApp() {
   app.use("/api/customers", customerRoutes);
   app.use("/api/customer-requests", customerRequestRoutes);
   app.use("/api/inventory", inventoryRoutes);
+  app.use("/api/quotes/:quoteId/recommendations", recommendationRoutes);
   app.use("/api/quotes", quoteRoutes);
   app.use("/api/approvals", approvalRoutes);
   app.use("/api/subscriptions", subscriptionRoutes);
   app.use("/api/invoices", invoiceRoutes);
   app.use("/api/warehouses", warehouseRoutes);
+  app.use("/api/governance-settings", governanceRoutes);
+  app.use("/api/portal", customerPortalRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

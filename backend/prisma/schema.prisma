@@ -50,6 +50,9 @@ enum QuoteStatus {
   APPROVED
   REJECTED
   REVISION_REQUIRED
+  // Distinct from REJECTED (an approver's call) - this is the customer
+  // withdrawing their own order via the portal's Cancel Order action.
+  CANCELLED
 }
 
 enum RiskLevel {
@@ -65,6 +68,19 @@ enum QuoteAuditAction {
   RETURNED
   REJECTED
   RESUBMITTED
+  // Customer-initiated (Negotiations tab), distinct from an approver's
+  // RETURNED - a customer can trigger this from an APPROVED or REJECTED
+  // quote, kicking it back to REVISION_REQUIRED for the Sales Rep.
+  CUSTOMER_NEGOTIATION
+  // Customer-initiated (dashboard's Cancel Order action) - distinct from an
+  // approver's REJECTED, since this reflects the customer's own withdrawal.
+  CUSTOMER_CANCELLED
+  // Sales-Rep-initiated, pre-submission (DRAFT/REVISION_REQUIRED only) -
+  // the Rep found the requested quantity exceeds available inventory and is
+  // telling the customer the order can't be fulfilled as-is. Reuses the
+  // REJECTED status transition so it surfaces via the existing Negotiations
+  // tab exactly like an approver's rejection would.
+  STOCK_UNAVAILABLE
 }
 
 enum BillingCycle {
@@ -90,6 +106,21 @@ enum SubscriptionEventType {
 enum InvoiceStatus {
   UNPAID
   PAID
+}
+
+enum RecommendationType {
+  UPSELL
+  CROSS_SELL
+}
+
+// SUGGESTED: AI-generated, visible only to the Sales Rep. SENT_TO_CUSTOMER:
+// Rep has shared it via the portal. ACCEPTED/DECLINED: the customer's
+// response - reserved for a later phase (the review UI isn't built yet).
+enum RecommendationStatus {
+  SUGGESTED
+  SENT_TO_CUSTOMER
+  ACCEPTED
+  DECLINED
 }
 
 model User {
@@ -123,10 +154,11 @@ model Product {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  requestItems  CustomerRequestItem[]
-  quoteItems    QuoteItem[]
-  inventory     Inventory[]
-  subscriptions Subscription[]
+  requestItems    CustomerRequestItem[]
+  quoteItems      QuoteItem[]
+  inventory       Inventory[]
+  subscriptions   Subscription[]
+  recommendations QuoteRecommendation[]
 
   @@map("products")
 }
@@ -142,6 +174,33 @@ model CategoryDiscountLimit {
   updatedAt             DateTime        @updatedAt
 
   @@map("category_discount_limits")
+}
+
+// Admin-configurable per-customer-tier discount ceiling. Combined with
+// CategoryDiscountLimit by the risk engine - the MORE RESTRICTIVE of the two
+// applies to a given line (a Gold customer's higher tier allowance still
+// can't exceed a low-margin category's own ceiling).
+model CustomerTierDiscountLimit {
+  id                    String       @id @default(uuid())
+  tier                  CustomerTier @unique
+  maxDiscountPercentage Decimal      @db.Decimal(5, 2)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@map("customer_tier_discount_limits")
+}
+
+// Singleton row (id is always "singleton") holding the admin-editable
+// thresholds that turn "over ceiling by how much" into a HIGH risk verdict.
+// LOW/MEDIUM aren't separately configurable: LOW is simply "no breach at
+// all", MEDIUM is everything else that isn't HIGH.
+model RiskEngineSettings {
+  id                      String   @id @default("singleton")
+  highRiskOverByThreshold Decimal  @default(10) @db.Decimal(5, 2)
+  highRiskBreachCountMin  Int      @default(2)
+  updatedAt               DateTime @updatedAt
+
+  @@map("risk_engine_settings")
 }
 
 model Customer {
@@ -193,6 +252,10 @@ model CustomerRequest {
   customerId String
   status     CustomerRequestStatus @default(NEW)
   notes      String?
+  // Customer's own discount ask when they raise this request (via the
+  // portal's "Create New Request" form, or a negotiation re-opening it) -
+  // purely informational context for the Sales Rep, never auto-applied.
+  expectedDiscountPercentage Decimal? @db.Decimal(5, 2)
   createdAt  DateTime              @default(now())
   updatedAt  DateTime              @updatedAt
 
@@ -251,8 +314,31 @@ model Quote {
   auditEntries    QuoteAuditEntry[]
   subscriptions   Subscription[]
   invoices        Invoice[]
+  recommendations QuoteRecommendation[]
 
   @@map("quotes")
+}
+
+// AI-generated upsell/cross-sell suggestions for a quote, grounded in the
+// real product catalog (the Groq call is given only real SKUs and must pick
+// from them - anything it hallucinates gets discarded before a row is ever
+// written here). Generating again replaces prior SUGGESTED rows for the
+// quote; rows already SENT_TO_CUSTOMER are left alone since they've already
+// been communicated.
+model QuoteRecommendation {
+  id        String                @id @default(uuid())
+  quoteId   String
+  productId String
+  type      RecommendationType
+  reason    String?
+  status    RecommendationStatus  @default(SUGGESTED)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  quote   Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("quote_recommendations")
 }
 
 // Approval-workflow audit trail. Every submit/auto-approve/approve/return/

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { getQuote, submitQuote, updateQuote } from "../../api/quotes";
+import { getQuote, markStockUnavailable, submitQuote, updateQuote } from "../../api/quotes";
 import { searchProducts } from "../../api/products";
-import { getProductAvailability } from "../../api/inventory";
-import type { Product, ProductCategory, Quote, WarehouseAvailability } from "../../types/sales";
+import { getStockAllocation } from "../../api/inventory";
+import { RecommendationsPanel } from "./RecommendationsPanel";
+import type { Product, ProductCategory, Quote, StockAllocationResult } from "../../types/sales";
 import "./sales.css";
 
 interface BuilderItem {
@@ -46,7 +47,12 @@ export function QuoteBuilder() {
   const [discountPercentage, setDiscountPercentage] = useState(0);
   const [taxPercentage, setTaxPercentage] = useState(0);
 
-  const [availability, setAvailability] = useState<Record<string, WarehouseAvailability[] | "loading" | "error">>({});
+  // Keyed by `${productId}:${quantity}` so changing a line's quantity
+  // triggers a fresh allocation check rather than reusing a stale one.
+  const [allocations, setAllocations] = useState<Record<string, StockAllocationResult | "loading" | "error">>({});
+  const [showStockIssueForm, setShowStockIssueForm] = useState(false);
+  const [stockIssueNote, setStockIssueNote] = useState("Order not possible");
+  const [isFlaggingStockIssue, setIsFlaggingStockIssue] = useState(false);
 
   // Viewing is fine for a Manager (their Quotations screen mirrors the Sales
   // Rep's), but editing/submitting is still the owning Sales Rep's alone -
@@ -77,21 +83,32 @@ export function QuoteBuilder() {
       .catch((err) => setLoadError(errorMessage(err, "Failed to load this quote.")));
   }, [id]);
 
-  const loadAvailability = useCallback((productId: string) => {
-    setAvailability((prev) => ({ ...prev, [productId]: "loading" }));
-    getProductAvailability(productId)
-      .then((data) => setAvailability((prev) => ({ ...prev, [productId]: data })))
-      .catch(() => setAvailability((prev) => ({ ...prev, [productId]: "error" })));
+  const loadAllocation = useCallback((productId: string, quantity: number) => {
+    const key = `${productId}:${quantity}`;
+    setAllocations((prev) => ({ ...prev, [key]: "loading" }));
+    getStockAllocation(productId, quantity)
+      .then((data) => setAllocations((prev) => ({ ...prev, [key]: data })))
+      .catch(() => setAllocations((prev) => ({ ...prev, [key]: "error" })));
   }, []);
 
   useEffect(() => {
     for (const item of items) {
-      if (!(item.productId in availability)) {
-        loadAvailability(item.productId);
+      const key = `${item.productId}:${item.quantity}`;
+      if (!(key in allocations)) {
+        loadAllocation(item.productId, item.quantity);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
+
+  // Flags on-screen when the currently-entered quantity for any line
+  // exceeds total available inventory - informational only, doesn't block
+  // saving/submitting on its own. The Rep decides whether to tell the
+  // customer via the "Mark Order Not Possible" action below.
+  const hasStockIssue = items.some((item) => {
+    const alloc = allocations[`${item.productId}:${item.quantity}`];
+    return alloc && alloc !== "loading" && alloc !== "error" && !alloc.fulfillable;
+  });
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -180,6 +197,22 @@ export function QuoteBuilder() {
     }
   }
 
+  async function handleMarkStockUnavailable() {
+    if (!id) return;
+    setActionError(null);
+    setIsFlaggingStockIssue(true);
+    try {
+      const updated = await markStockUnavailable(id, stockIssueNote.trim() || undefined);
+      setQuote(updated);
+      setShowStockIssueForm(false);
+      setSuccessMessage("Customer notified: order not possible.");
+    } catch (err) {
+      setActionError(errorMessage(err, "Failed to notify the customer."));
+    } finally {
+      setIsFlaggingStockIssue(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!id) return;
     setActionError(null);
@@ -238,6 +271,55 @@ export function QuoteBuilder() {
           <span className="tier-badge">{quote.customer.tier}</span>
         </p>
       </div>
+
+      {isEditable && hasStockIssue && (
+        <div className="sales-card">
+          <h2>Stock Issue Detected</h2>
+          <p className="banner-error">
+            One or more products in this quote exceed available inventory. If this can't be resolved, let
+            the customer know.
+          </p>
+          {!showStockIssueForm ? (
+            <div className="sales-actions">
+              <button className="sales-btn sales-btn-danger" onClick={() => setShowStockIssueForm(true)}>
+                Mark Order Not Possible
+              </button>
+            </div>
+          ) : (
+            <>
+              <textarea
+                value={stockIssueNote}
+                onChange={(e) => setStockIssueNote(e.target.value)}
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: "0.6rem",
+                  borderRadius: 6,
+                  border: "1px solid #ccc",
+                  fontFamily: "inherit",
+                  marginBottom: "0.75rem",
+                }}
+              />
+              <div className="sales-actions">
+                <button
+                  className="sales-btn sales-btn-danger"
+                  onClick={handleMarkStockUnavailable}
+                  disabled={isFlaggingStockIssue}
+                >
+                  {isFlaggingStockIssue ? "Notifying..." : "Confirm & Notify Customer"}
+                </button>
+                <button
+                  className="sales-btn"
+                  onClick={() => setShowStockIssueForm(false)}
+                  disabled={isFlaggingStockIssue}
+                >
+                  Never Mind
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {isEditable && (
         <div className="sales-card">
@@ -312,21 +394,35 @@ export function QuoteBuilder() {
                     {item.name}
                     <div>
                       {(() => {
-                        const avail = availability[item.productId];
-                        if (avail === "loading") {
-                          return <span className="warehouse-line">Loading availability...</span>;
+                        const alloc = allocations[`${item.productId}:${item.quantity}`];
+                        if (alloc === "loading") {
+                          return <span className="warehouse-line">Checking stock...</span>;
                         }
-                        if (avail === "error" || !avail) {
+                        if (alloc === "error" || !alloc) {
                           return null;
                         }
-                        if (avail.length === 0) {
+                        if (alloc.totalAvailable === 0 && alloc.allocations.length === 0) {
                           return <span className="warehouse-line">No warehouse stock configured.</span>;
                         }
-                        return avail.map((w) => (
-                          <div className="warehouse-line" key={w.warehouseId}>
-                            {w.warehouseName} ({w.location}) — {w.quantityAvailable} available
-                          </div>
-                        ));
+                        return (
+                          <>
+                            {!alloc.fulfillable && (
+                              <div
+                                className="banner-error"
+                                style={{ margin: "0.3rem 0", padding: "0.35rem 0.6rem", fontSize: "0.78rem" }}
+                              >
+                                Order not possible — only {alloc.totalAvailable} available, need{" "}
+                                {alloc.requestedQuantity} (short by {alloc.shortfall}).
+                              </div>
+                            )}
+                            {alloc.allocations.map((a) => (
+                              <div className="warehouse-line" key={a.warehouseId}>
+                                {a.warehouseName} ({a.location}) — take {a.quantityAllocated} of{" "}
+                                {a.quantityAvailable} available
+                              </div>
+                            ))}
+                          </>
+                        );
                       })()}
                     </div>
                   </td>
@@ -428,9 +524,13 @@ export function QuoteBuilder() {
         </p>
       </div>
 
-      <div className="recommendations-panel">
-        Upsell &amp; cross-sell recommendations will appear here in a future release.
-      </div>
+      {(isOwnQuote || user?.role === "ADMIN") && (
+        <RecommendationsPanel
+          quoteId={quote.id}
+          hasItems={items.length > 0}
+          onBeforeGenerate={isEditable ? persistItems : undefined}
+        />
+      )}
 
       {isEditable && (
         <div className="sales-actions" style={{ marginTop: "1.25rem" }}>

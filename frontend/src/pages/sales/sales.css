@@ -187,7 +187,8 @@
 .status-IN_REVIEW,
 .status-PENDING_MANAGER_APPROVAL,
 .status-PENDING_FINANCE_APPROVAL,
-.status-PENDING_ADMIN_APPROVAL {
+.status-PENDING_ADMIN_APPROVAL,
+.status-IN_PROGRESS {
   background: #fff4e0;
   color: #b3720a;
 }
@@ -209,9 +210,27 @@
 }
 
 .status-CANCELLED,
-.status-REJECTED {
+.status-REJECTED,
+.status-DECLINED {
   background: #fdecea;
   color: #b3261e;
+}
+
+.status-SENT_TO_CUSTOMER,
+.status-ACCEPTED {
+  background: #e6f6ec;
+  color: #1b8a4a;
+}
+
+.notification-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #2f6fed;
+  color: #fff;
+  margin-left: 0.4rem;
 }
 
 .tier-badge {

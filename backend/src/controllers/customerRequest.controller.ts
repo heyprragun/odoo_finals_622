@@ -40,6 +40,8 @@ function detail(request: RequestWithFullItems) {
     customer: { id: request.customer.id, name: request.customer.name, tier: request.customer.tier },
     status: request.status,
     notes: request.notes,
+    expectedDiscountPercentage:
+      request.expectedDiscountPercentage === null ? null : Number(request.expectedDiscountPercentage),
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
     quote: request.quote

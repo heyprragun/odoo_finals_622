@@ -6,6 +6,7 @@ import { validateBody } from "../middleware/validate";
 import { updateInventorySchema } from "../validation/inventory.validation";
 import {
   getProductAvailability,
+  getStockAllocation,
   listStockSummary,
   updateInventory,
 } from "../controllers/inventory.controller";
@@ -26,6 +27,12 @@ router.get(
   authenticateToken,
   authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.ADMIN),
   getProductAvailability
+);
+router.get(
+  "/product/:productId/allocation",
+  authenticateToken,
+  authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.ADMIN),
+  getStockAllocation
 );
 
 // Stock write is Admin-only.

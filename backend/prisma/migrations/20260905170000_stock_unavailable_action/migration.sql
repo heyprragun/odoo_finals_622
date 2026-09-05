@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "QuoteAuditAction" ADD VALUE 'STOCK_UNAVAILABLE';
+

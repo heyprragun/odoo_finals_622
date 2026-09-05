@@ -61,11 +61,18 @@ const INVENTORY_BY_SKU: Record<string, Record<string, number>> = {
 };
 
 // Default discount ceilings used by the approval risk engine. Admin-editable
-// in a future phase; for now these are the seeded defaults.
+// via the Discount Settings page; these are just the seeded starting values.
 const CATEGORY_DISCOUNT_LIMITS: Record<ProductCategory, number> = {
   [ProductCategory.HARDWARE]: 15,
   [ProductCategory.SERVICE]: 10,
   [ProductCategory.SUBSCRIPTION]: 20,
+};
+
+// Higher tiers get more discount latitude by default - also admin-editable.
+const CUSTOMER_TIER_DISCOUNT_LIMITS: Record<CustomerTier, number> = {
+  [CustomerTier.GOLD]: 25,
+  [CustomerTier.SILVER]: 18,
+  [CustomerTier.BRONZE]: 10,
 };
 
 const CUSTOMER_REQUESTS = [
@@ -182,6 +189,15 @@ async function main() {
       where: { category: category as ProductCategory },
       update: { maxDiscountPercentage },
       create: { category: category as ProductCategory, maxDiscountPercentage },
+    });
+  }
+
+  console.log("Seeding customer tier discount limits...");
+  for (const [tier, maxDiscountPercentage] of Object.entries(CUSTOMER_TIER_DISCOUNT_LIMITS)) {
+    await prisma.customerTierDiscountLimit.upsert({
+      where: { tier: tier as CustomerTier },
+      update: { maxDiscountPercentage },
+      create: { tier: tier as CustomerTier, maxDiscountPercentage },
     });
   }
 

@@ -3,7 +3,11 @@ import * as quoteService from "../services/quote.service";
 import { sanitizeQuote } from "../utils/sanitizeQuote";
 import { ApiError } from "../utils/ApiError";
 import { isUuid } from "../utils/isUuid";
-import type { CreateQuoteInput, UpdateQuoteInput } from "../validation/quote.validation";
+import type {
+  CreateQuoteInput,
+  MarkStockUnavailableInput,
+  UpdateQuoteInput,
+} from "../validation/quote.validation";
 
 export async function listMyQuotes(req: Request, res: Response, next: NextFunction) {
   try {
@@ -57,6 +61,19 @@ export async function submitQuote(req: Request, res: Response, next: NextFunctio
       throw ApiError.badRequest("Invalid quote id");
     }
     const quote = await quoteService.submitQuote(req.params.id, req.user!);
+    res.status(200).json({ success: true, data: sanitizeQuote(quote) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function markStockUnavailable(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!isUuid(req.params.id)) {
+      throw ApiError.badRequest("Invalid quote id");
+    }
+    const input = req.body as MarkStockUnavailableInput;
+    const quote = await quoteService.markStockUnavailable(req.params.id, req.user!, input.note);
     res.status(200).json({ success: true, data: sanitizeQuote(quote) });
   } catch (err) {
     next(err);

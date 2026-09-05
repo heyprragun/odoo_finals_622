@@ -21,6 +21,13 @@ import { DealHealth } from "./pages/sales/DealHealth";
 import { Invoices } from "./pages/sales/Invoices";
 import { InvoiceDetail } from "./pages/sales/InvoiceDetail";
 import { ProductEdit } from "./pages/sales/ProductEdit";
+import { CustomerLayout } from "./pages/customer/CustomerLayout";
+import { DiscountSettings } from "./pages/sales/DiscountSettings";
+import { CustomerSubscriptions } from "./pages/customer/CustomerSubscriptions";
+import { CreateCustomerRequest } from "./pages/customer/CreateCustomerRequest";
+import { CustomerInvoices } from "./pages/customer/CustomerInvoices";
+import { Negotiations } from "./pages/customer/Negotiations";
+import { CustomerOrderDetail } from "./pages/customer/CustomerOrderDetail";
 
 function App() {
   return (
@@ -65,6 +72,22 @@ function App() {
           path="reports"
           element={<ComingSoon title="Reports" deniedRoles={["SALES_REP", "MANAGER", "FINANCE"]} />}
         />
+        <Route path="discount-settings" element={<DiscountSettings />} />
+      </Route>
+
+      <Route
+        path="/portal"
+        element={
+          <ProtectedRoute allowedRoles={["CUSTOMER"]}>
+            <CustomerLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="orders/:id" element={<CustomerOrderDetail />} />
+        <Route path="subscriptions" element={<CustomerSubscriptions />} />
+        <Route path="requests/new" element={<CreateCustomerRequest />} />
+        <Route path="invoices" element={<CustomerInvoices />} />
+        <Route path="negotiations" element={<Negotiations />} />
       </Route>
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

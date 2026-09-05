@@ -41,3 +41,10 @@ export async function submitQuote(id: string) {
   const res = await apiClient.post<{ success: true; data: Quote }>(`/quotes/${id}/submit`);
   return res.data.data;
 }
+
+export async function markStockUnavailable(id: string, note?: string) {
+  const res = await apiClient.post<{ success: true; data: Quote }>(`/quotes/${id}/mark-stock-unavailable`, {
+    note,
+  });
+  return res.data.data;
+}

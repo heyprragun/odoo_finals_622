@@ -1,7 +1,7 @@
-import { CustomerRequestStatus, Prisma, QuoteAuditAction, QuoteStatus, RiskLevel, Role } from "@prisma/client";
+import { CustomerRequestStatus, Prisma, QuoteAuditAction, QuoteStatus, Role } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
-import { assessDiscountRisk, getCategoryDiscountLimits } from "./discountGovernance.service";
+import { assessDiscountRisk, getDiscountGovernanceContext } from "./discountGovernance.service";
 import type { CreateQuoteInput, QuoteItemInput, UpdateQuoteInput } from "../validation/quote.validation";
 
 // A quote is editable/re-submittable by its Sales Rep only while it's a
@@ -73,7 +73,7 @@ function toQuoteItemsCreateData(items: ResolvedLineItem[]) {
  * taxAmount = taxableAmount * taxPercentage / 100
  * totalAmount = taxableAmount + taxAmount
  */
-function calculateTotals(
+export function calculateTotals(
   items: { unitPrice: Prisma.Decimal; quantity: number }[],
   discountPercentage: Prisma.Decimal,
   taxPercentage: Prisma.Decimal
@@ -238,7 +238,7 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.quote.findUnique({
       where: { id: quoteId },
-      include: { items: { include: { product: true } } },
+      include: { items: { include: { product: true } }, customer: true },
     });
     if (!existing) {
       throw ApiError.notFound("Quote not found");
@@ -259,19 +259,15 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
       existing.taxPercentage
     );
 
-    // Discount-governance risk engine decides routing: LOW skips straight to
-    // the Admin master-approval gate; MEDIUM/HIGH go to the Sales Manager
-    // first (Finance only gets involved for HIGH, once the Manager has
-    // signed off). Every path still ends at Admin - see approval.service.ts's
-    // approve transition - since no quote is confirmed without Admin sign-off,
-    // regardless of risk level.
-    const limits = await getCategoryDiscountLimits(tx);
-    const { riskLevel } = assessDiscountRisk(existing.items, totals.discountPercentage, limits);
+    // Discount-governance risk engine decides risk level, but every quote -
+    // regardless of risk - goes to the Sales Manager first. Finance only
+    // gets involved for HIGH risk, once the Manager has signed off (see
+    // approval.service.ts's approve transition), and every path still ends
+    // at Admin since no quote is confirmed without Admin's master sign-off.
+    const governanceContext = await getDiscountGovernanceContext(tx, existing.customer.tier);
+    const { riskLevel } = assessDiscountRisk(existing.items, totals.discountPercentage, governanceContext);
 
-    const nextStatus =
-      riskLevel === RiskLevel.LOW
-        ? QuoteStatus.PENDING_ADMIN_APPROVAL
-        : QuoteStatus.PENDING_MANAGER_APPROVAL;
+    const nextStatus = QuoteStatus.PENDING_MANAGER_APPROVAL;
 
     const isResubmission = existing.status === QuoteStatus.REVISION_REQUIRED;
 
@@ -286,11 +282,7 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
         quoteId,
         userId: user.id,
         action: isResubmission ? QuoteAuditAction.RESUBMITTED : QuoteAuditAction.SUBMITTED,
-        note:
-          `Applied ${totals.discountPercentage}% discount, ${totals.taxPercentage}% tax` +
-          (riskLevel === RiskLevel.LOW
-            ? " - no discount ceiling breaches, routed directly to Admin for final approval"
-            : ""),
+        note: `Applied ${totals.discountPercentage}% discount, ${totals.taxPercentage}% tax`,
       },
     });
 
@@ -304,5 +296,43 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
     }
 
     return quote;
+  });
+}
+
+/**
+ * A pre-submission bail-out: the Sales Rep found the requested quantity
+ * exceeds available inventory and is telling the customer up front that the
+ * order can't be fulfilled as quoted. Reuses the REJECTED status - this
+ * quote then surfaces via the customer's Negotiations tab exactly like an
+ * approver's rejection would (with this note as the rejection reason),
+ * letting the customer negotiate down the quantity through the same
+ * existing flow rather than needing a separate mechanism.
+ */
+export async function markStockUnavailable(quoteId: string, user: AuthenticatedUser, note: string) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.quote.findUnique({ where: { id: quoteId } });
+    if (!existing) {
+      throw ApiError.notFound("Quote not found");
+    }
+    if (existing.salesRepId !== user.id) {
+      throw ApiError.forbidden("You can only manage your own quotes");
+    }
+    if (!EDITABLE_STATUSES.includes(existing.status)) {
+      throw ApiError.badRequest("Only draft or revision-required quotes can be marked as not possible");
+    }
+
+    const result = await tx.quote.updateMany({
+      where: { id: quoteId, status: existing.status },
+      data: { status: QuoteStatus.REJECTED },
+    });
+    if (result.count === 0) {
+      throw ApiError.conflict("This quote just changed - please refresh and try again");
+    }
+
+    await tx.quoteAuditEntry.create({
+      data: { quoteId, userId: user.id, action: QuoteAuditAction.STOCK_UNAVAILABLE, note },
+    });
+
+    return tx.quote.findUniqueOrThrow({ where: { id: quoteId }, include: QUOTE_INCLUDE });
   });
 }

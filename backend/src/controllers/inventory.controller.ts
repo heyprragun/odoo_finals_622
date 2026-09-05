@@ -3,6 +3,7 @@ import {
   getAvailabilityForProduct,
   getStockSummary,
   setInventoryForProduct,
+  suggestStockAllocation,
 } from "../services/inventory.service";
 import { getProductById } from "../services/product.service";
 import { ApiError } from "../utils/ApiError";
@@ -41,6 +42,28 @@ export async function getProductAvailability(req: Request, res: Response, next: 
 
     const inventory = await getAvailabilityForProduct(productId);
     res.status(200).json({ success: true, data: formatAvailability(inventory) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getStockAllocation(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { productId } = req.params;
+    if (!isUuid(productId)) {
+      throw ApiError.badRequest("Invalid product id");
+    }
+    const quantity = Number(req.query.quantity);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw ApiError.badRequest("quantity must be a positive whole number");
+    }
+    const product = await getProductById(productId);
+    if (!product) {
+      throw ApiError.notFound("Product not found");
+    }
+
+    const result = await suggestStockAllocation(productId, quantity);
+    res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

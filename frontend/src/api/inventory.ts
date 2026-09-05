@@ -1,9 +1,17 @@
 import { apiClient } from "./client";
-import type { StockSummaryItem, WarehouseAvailability } from "../types/sales";
+import type { StockAllocationResult, StockSummaryItem, WarehouseAvailability } from "../types/sales";
 
 export async function getProductAvailability(productId: string) {
   const res = await apiClient.get<{ success: true; data: WarehouseAvailability[] }>(
     `/inventory/product/${productId}`
+  );
+  return res.data.data;
+}
+
+export async function getStockAllocation(productId: string, quantity: number) {
+  const res = await apiClient.get<{ success: true; data: StockAllocationResult }>(
+    `/inventory/product/${productId}/allocation`,
+    { params: { quantity } }
   );
   return res.data.data;
 }

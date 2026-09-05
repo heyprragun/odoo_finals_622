@@ -34,6 +34,11 @@ export const updateQuoteSchema = z.object({
   taxPercentage: percentageSchema.optional(),
 });
 
+export const markStockUnavailableSchema = z.object({
+  note: z.string().trim().min(1).max(2000).default("Order not possible"),
+});
+
 export type QuoteItemInput = z.infer<typeof quoteItemInputSchema>;
 export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
 export type UpdateQuoteInput = z.infer<typeof updateQuoteSchema>;
+export type MarkStockUnavailableInput = z.infer<typeof markStockUnavailableSchema>;

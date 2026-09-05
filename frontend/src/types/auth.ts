@@ -22,6 +22,8 @@ export interface RegisterPayload {
   email: string;
   password: string;
   role: Role;
+  // Required only when role is CUSTOMER - see Register.tsx.
+  companyName?: string;
 }
 
 export interface LoginPayload {

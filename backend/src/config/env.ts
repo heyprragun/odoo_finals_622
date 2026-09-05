@@ -14,4 +14,6 @@ export const env = {
   jwtSecret: requireEnv("JWT_SECRET"),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "1d",
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5174",
+  groqApiKey: requireEnv("GROQ_API_KEY"),
+  groqModel: process.env.GROQ_MODEL ?? "openai/gpt-oss-20b",
 };

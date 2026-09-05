@@ -16,7 +16,7 @@ export function authenticateToken(req: Request, _res: Response, next: NextFuncti
 
   try {
     const payload = verifyToken(token);
-    req.user = { id: payload.sub, role: payload.role };
+    req.user = { id: payload.sub, role: payload.role, customerId: payload.customerId };
     next();
   } catch (err: any) {
     if (err?.name === "TokenExpiredError") {

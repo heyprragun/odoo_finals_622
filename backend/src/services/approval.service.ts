@@ -1,7 +1,7 @@
 import { Prisma, QuoteAuditAction, QuoteStatus, RiskLevel, Role } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
-import { assessDiscountRisk, getCategoryDiscountLimits } from "./discountGovernance.service";
+import { assessDiscountRisk, getDiscountGovernanceContext } from "./discountGovernance.service";
 import { createSubscriptionsForApprovedQuote } from "./subscription.service";
 import { createInvoicesForApprovedQuote } from "./invoice.service";
 
@@ -203,8 +203,8 @@ export async function getApprovalDetail(quoteId: string, user: AuthenticatedUser
     throw ApiError.badRequest("This quote has not entered the approval workflow");
   }
 
-  const limits = await getCategoryDiscountLimits(prisma);
-  const { lines } = assessDiscountRisk(quote.items, quote.discountPercentage, limits);
+  const governanceContext = await getDiscountGovernanceContext(prisma, quote.customer.tier);
+  const { lines } = assessDiscountRisk(quote.items, quote.discountPercentage, governanceContext);
 
   const [manager, finance, admin] = await Promise.all([
     getPrimaryUserForRole(prisma, Role.MANAGER),

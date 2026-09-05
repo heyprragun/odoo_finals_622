@@ -14,8 +14,10 @@ import {
 
 const router = Router();
 
-// FINANCE does not get product-catalog access.
-router.use(authenticateToken, authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.ADMIN));
+// FINANCE does not get product-catalog access. CUSTOMER passes this gate for
+// the read routes only (their "Create New Request" product dropdown) - the
+// write routes below layer their own Role.ADMIN-only gate on top.
+router.use(authenticateToken, authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.ADMIN, Role.CUSTOMER));
 
 router.get("/", listProducts);
 router.get("/:id", getProduct);

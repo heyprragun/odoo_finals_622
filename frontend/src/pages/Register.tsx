@@ -14,6 +14,7 @@ export function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("SALES_REP");
+  const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -22,7 +23,13 @@ export function Register() {
     setError(null);
     setIsSubmitting(true);
     try {
-      await register({ name, email, password, role });
+      await register({
+        name,
+        email,
+        password,
+        role,
+        companyName: role === "CUSTOMER" ? companyName : undefined,
+      });
       navigate("/dashboard");
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.data?.message) {
@@ -41,6 +48,18 @@ export function Register() {
         <h1>Create your DealFlow360 account</h1>
         {error && <div className="auth-error">{error}</div>}
         <form onSubmit={handleSubmit}>
+          {role === "CUSTOMER" && (
+            <div className="auth-field">
+              <label htmlFor="companyName">Company</label>
+              <input
+                id="companyName"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                placeholder="Your company's name"
+                required
+              />
+            </div>
+          )}
           <div className="auth-field">
             <label htmlFor="name">Name</label>
             <input id="name" value={name} onChange={(e) => setName(e.target.value)} required />

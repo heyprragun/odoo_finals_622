@@ -3,13 +3,14 @@ import { Role } from "@prisma/client";
 import { authenticateToken } from "../middleware/authenticateToken";
 import { authorizeRoles } from "../middleware/authorizeRoles";
 import { validateBody } from "../middleware/validate";
-import { createQuoteSchema, updateQuoteSchema } from "../validation/quote.validation";
+import { createQuoteSchema, markStockUnavailableSchema, updateQuoteSchema } from "../validation/quote.validation";
 import {
   listMyQuotes,
   getQuote,
   createQuote,
   updateQuote,
   submitQuote,
+  markStockUnavailable,
 } from "../controllers/quote.controller";
 
 const router = Router();
@@ -24,5 +25,11 @@ router.get("/:id", authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.FINANCE, Ro
 router.post("/", authorizeRoles(Role.SALES_REP), validateBody(createQuoteSchema), createQuote);
 router.put("/:id", authorizeRoles(Role.SALES_REP), validateBody(updateQuoteSchema), updateQuote);
 router.post("/:id/submit", authorizeRoles(Role.SALES_REP), submitQuote);
+router.post(
+  "/:id/mark-stock-unavailable",
+  authorizeRoles(Role.SALES_REP),
+  validateBody(markStockUnavailableSchema),
+  markStockUnavailable
+);
 
 export default router;
