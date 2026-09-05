@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
-import type { Customer, CustomerRequest, CustomerRequestItem, Product } from "@prisma/client";
+import type { Customer, CustomerRequest, CustomerRequestItem, Product, Quote } from "@prisma/client";
 import {
-  listCustomerRequests,
+  listActiveCustomerRequests,
   getCustomerRequestById,
 } from "../services/customerRequest.service";
 import { ApiError } from "../utils/ApiError";
@@ -12,9 +12,12 @@ type RequestWithCustomerAndItems = CustomerRequest & {
   items: CustomerRequestItem[];
 };
 
+type LinkedQuoteSummary = Pick<Quote, "id" | "quoteNumber" | "status">;
+
 type RequestWithFullItems = CustomerRequest & {
   customer: Customer;
   items: (CustomerRequestItem & { product: Product })[];
+  quote: LinkedQuoteSummary | null;
 };
 
 function summarize(request: RequestWithCustomerAndItems) {
@@ -39,6 +42,9 @@ function detail(request: RequestWithFullItems) {
     notes: request.notes,
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
+    quote: request.quote
+      ? { id: request.quote.id, quoteNumber: request.quote.quoteNumber, status: request.quote.status }
+      : null,
     items: request.items.map((item) => ({
       id: item.id,
       productId: item.productId,
@@ -57,7 +63,7 @@ function detail(request: RequestWithFullItems) {
 
 export async function listRequests(_req: Request, res: Response, next: NextFunction) {
   try {
-    const requests = await listCustomerRequests();
+    const requests = await listActiveCustomerRequests();
     res.status(200).json({ success: true, data: requests.map(summarize) });
   } catch (err) {
     next(err);

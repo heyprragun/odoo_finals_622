@@ -2,16 +2,27 @@ import { Router } from "express";
 import { Role } from "@prisma/client";
 import { authenticateToken } from "../middleware/authenticateToken";
 import { authorizeRoles } from "../middleware/authorizeRoles";
-import { listProducts, getProduct } from "../controllers/product.controller";
+import { validateBody } from "../middleware/validate";
+import { createProductSchema, updateProductSchema } from "../validation/product.validation";
+import {
+  listProducts,
+  getProduct,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from "../controllers/product.controller";
 
 const router = Router();
 
-router.use(
-  authenticateToken,
-  authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.FINANCE, Role.ADMIN)
-);
+// FINANCE does not get product-catalog access.
+router.use(authenticateToken, authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.ADMIN));
 
 router.get("/", listProducts);
 router.get("/:id", getProduct);
+
+// Master-data management is Admin-only.
+router.post("/", authorizeRoles(Role.ADMIN), validateBody(createProductSchema), createProduct);
+router.put("/:id", authorizeRoles(Role.ADMIN), validateBody(updateProductSchema), updateProduct);
+router.delete("/:id", authorizeRoles(Role.ADMIN), deleteProduct);
 
 export default router;

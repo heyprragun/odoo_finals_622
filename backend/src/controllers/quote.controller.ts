@@ -7,7 +7,7 @@ import type { CreateQuoteInput, UpdateQuoteInput } from "../validation/quote.val
 
 export async function listMyQuotes(req: Request, res: Response, next: NextFunction) {
   try {
-    const quotes = await quoteService.listQuotesForSalesRep(req.user!.id);
+    const quotes = await quoteService.listQuotes(req.user!);
     res.status(200).json({ success: true, data: quotes.map(sanitizeQuote) });
   } catch (err) {
     next(err);
@@ -19,7 +19,7 @@ export async function getQuote(req: Request, res: Response, next: NextFunction) 
     if (!isUuid(req.params.id)) {
       throw ApiError.badRequest("Invalid quote id");
     }
-    const quote = await quoteService.getQuoteForSalesRep(req.params.id, req.user!);
+    const quote = await quoteService.getQuoteForUser(req.params.id, req.user!);
     res.status(200).json({ success: true, data: sanitizeQuote(quote) });
   } catch (err) {
     next(err);
@@ -29,8 +29,10 @@ export async function getQuote(req: Request, res: Response, next: NextFunction) 
 export async function createQuote(req: Request, res: Response, next: NextFunction) {
   try {
     const input = req.body as CreateQuoteInput;
-    const quote = await quoteService.createQuote(input, req.user!.id);
-    res.status(201).json({ success: true, data: sanitizeQuote(quote) });
+    const { quote, created } = await quoteService.createQuote(input, req.user!.id);
+    // 200 when an existing quote for this request was reused instead of a
+    // new one being created (a request converts into at most one quotation).
+    res.status(created ? 201 : 200).json({ success: true, data: sanitizeQuote(quote) });
   } catch (err) {
     next(err);
   }

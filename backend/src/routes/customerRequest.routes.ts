@@ -6,8 +6,10 @@ import { listRequests, getRequest } from "../controllers/customerRequest.control
 
 const router = Router();
 
-// SALES_REP only for now. Manager/Admin visibility into requests is a future concern.
-router.use(authenticateToken, authorizeRoles(Role.SALES_REP));
+// SALES_REP creates/works requests; MANAGER, FINANCE and ADMIN can view the
+// same queue (needed for their "same dashboard" view) but never get write
+// routes here since there aren't any - this whole router is GET-only.
+router.use(authenticateToken, authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.FINANCE, Role.ADMIN));
 
 router.get("/", listRequests);
 router.get("/:id", getRequest);

@@ -1,7 +1,12 @@
-import { CustomerRequestStatus, Prisma, QuoteStatus, type Role } from "@prisma/client";
+import { CustomerRequestStatus, Prisma, QuoteAuditAction, QuoteStatus, RiskLevel, Role } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
+import { assessDiscountRisk, getCategoryDiscountLimits } from "./discountGovernance.service";
 import type { CreateQuoteInput, QuoteItemInput, UpdateQuoteInput } from "../validation/quote.validation";
+
+// A quote is editable/re-submittable by its Sales Rep only while it's a
+// draft or has just been kicked back for revision by an approver.
+const EDITABLE_STATUSES: QuoteStatus[] = [QuoteStatus.DRAFT, QuoteStatus.REVISION_REQUIRED];
 
 interface AuthenticatedUser {
   id: string;
@@ -56,17 +61,32 @@ function toQuoteItemsCreateData(items: ResolvedLineItem[]) {
   }));
 }
 
-// Backend-authoritative totals. Never trust subtotal/total values sent by the client.
-function calculateTotals(items: { unitPrice: Prisma.Decimal; quantity: number }[]) {
+/**
+ * Backend-authoritative totals. Never trust subtotal/discount/tax/total
+ * values sent by the client - only the raw percentages are accepted as
+ * input, and even those are always re-applied to a freshly computed
+ * subtotal here.
+ *
+ * subtotal = sum(quantity * unitPrice)
+ * discountAmount = subtotal * discountPercentage / 100
+ * taxableAmount = subtotal - discountAmount
+ * taxAmount = taxableAmount * taxPercentage / 100
+ * totalAmount = taxableAmount + taxAmount
+ */
+function calculateTotals(
+  items: { unitPrice: Prisma.Decimal; quantity: number }[],
+  discountPercentage: Prisma.Decimal,
+  taxPercentage: Prisma.Decimal
+) {
   const subtotal = items.reduce(
     (sum, item) => sum.add(item.unitPrice.mul(item.quantity)),
     new Prisma.Decimal(0)
   );
-  // Discount/tax governance is a later phase - always zero for now.
-  const discountAmount = new Prisma.Decimal(0);
-  const taxAmount = new Prisma.Decimal(0);
-  const totalAmount = subtotal.sub(discountAmount).add(taxAmount);
-  return { subtotal, discountAmount, taxAmount, totalAmount };
+  const discountAmount = subtotal.mul(discountPercentage).div(100);
+  const taxableAmount = subtotal.sub(discountAmount);
+  const taxAmount = taxableAmount.mul(taxPercentage).div(100);
+  const totalAmount = taxableAmount.add(taxAmount);
+  return { subtotal, discountPercentage, taxPercentage, discountAmount, taxAmount, totalAmount };
 }
 
 async function generateQuoteNumber(tx: Prisma.TransactionClient): Promise<string> {
@@ -74,20 +94,23 @@ async function generateQuoteNumber(tx: Prisma.TransactionClient): Promise<string
   return `QT-${String(count + 1).padStart(5, "0")}`;
 }
 
-export async function listQuotesForSalesRep(salesRepId: string) {
+// SALES_REP sees only their own quotes; MANAGER sees every quote (read-only
+// oversight - "same screen" as the Sales Rep's Quotations page).
+export async function listQuotes(user: AuthenticatedUser) {
+  const where: Prisma.QuoteWhereInput = user.role === Role.SALES_REP ? { salesRepId: user.id } : {};
   return prisma.quote.findMany({
-    where: { salesRepId },
+    where,
     include: QUOTE_INCLUDE,
     orderBy: { createdAt: "desc" },
   });
 }
 
-export async function getQuoteForSalesRep(quoteId: string, user: AuthenticatedUser) {
+export async function getQuoteForUser(quoteId: string, user: AuthenticatedUser) {
   const quote = await prisma.quote.findUnique({ where: { id: quoteId }, include: QUOTE_INCLUDE });
   if (!quote) {
     throw ApiError.notFound("Quote not found");
   }
-  if (quote.salesRepId !== user.id) {
+  if (user.role === Role.SALES_REP && quote.salesRepId !== user.id) {
     throw ApiError.forbidden("You can only view your own quotes");
   }
   return quote;
@@ -97,20 +120,33 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
   return prisma.$transaction(async (tx) => {
     let customerId = input.customerId;
     let requestItems: { productId: string; quantity: number }[] = [];
-    let customerRequest: { id: string; customerId: string; status: CustomerRequestStatus } | null =
-      null;
+    let customerRequest: { id: string; customerId: string } | null = null;
 
     if (input.customerRequestId) {
       const request = await tx.customerRequest.findUnique({
         where: { id: input.customerRequestId },
-        include: { items: true },
+        include: { items: true, quote: true },
       });
       if (!request) {
         throw ApiError.badRequest("Customer request not found");
       }
+
+      // A request converts into at most one quotation. If one already
+      // exists (draft or submitted), return it instead of creating a
+      // duplicate - this also covers the CONVERTED case, since a converted
+      // request always has a linked quote by construction.
+      if (request.quote) {
+        const existingQuote = await tx.quote.findUnique({
+          where: { id: request.quote.id },
+          include: QUOTE_INCLUDE,
+        });
+        return { quote: existingQuote!, created: false };
+      }
+
       if (request.status === CustomerRequestStatus.CANCELLED) {
         throw ApiError.badRequest("Cannot create a quote from a cancelled request");
       }
+
       customerRequest = request;
       customerId = request.customerId;
       requestItems = request.items.map((item) => ({
@@ -131,7 +167,9 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
     const sourceItems: QuoteItemInput[] =
       input.items && input.items.length > 0 ? input.items : requestItems;
     const resolvedItems = await resolveLineItems(tx, sourceItems);
-    const totals = calculateTotals(resolvedItems);
+    const discountPercentage = new Prisma.Decimal(input.discountPercentage ?? 0);
+    const taxPercentage = new Prisma.Decimal(input.taxPercentage ?? 0);
+    const totals = calculateTotals(resolvedItems, discountPercentage, taxPercentage);
     const quoteNumber = await generateQuoteNumber(tx);
 
     const quote = await tx.quote.create({
@@ -147,14 +185,14 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
       include: QUOTE_INCLUDE,
     });
 
-    if (customerRequest && customerRequest.status !== CustomerRequestStatus.QUOTED) {
+    if (customerRequest) {
       await tx.customerRequest.update({
         where: { id: customerRequest.id },
         data: { status: CustomerRequestStatus.QUOTED },
       });
     }
 
-    return quote;
+    return { quote, created: true };
   });
 }
 
@@ -171,12 +209,16 @@ export async function updateQuote(
     if (existing.salesRepId !== user.id) {
       throw ApiError.forbidden("You can only edit your own quotes");
     }
-    if (existing.status !== QuoteStatus.DRAFT) {
-      throw ApiError.badRequest("Only draft quotes can be edited");
+    if (!EDITABLE_STATUSES.includes(existing.status)) {
+      throw ApiError.badRequest("Only draft or revision-required quotes can be edited");
     }
 
     const resolvedItems = await resolveLineItems(tx, input.items);
-    const totals = calculateTotals(resolvedItems);
+    const discountPercentage = new Prisma.Decimal(
+      input.discountPercentage ?? existing.discountPercentage
+    );
+    const taxPercentage = new Prisma.Decimal(input.taxPercentage ?? existing.taxPercentage);
+    const totals = calculateTotals(resolvedItems, discountPercentage, taxPercentage);
 
     await tx.quoteItem.deleteMany({ where: { quoteId } });
 
@@ -196,7 +238,7 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.quote.findUnique({
       where: { id: quoteId },
-      include: { items: true },
+      include: { items: { include: { product: true } } },
     });
     if (!existing) {
       throw ApiError.notFound("Quote not found");
@@ -204,21 +246,63 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
     if (existing.salesRepId !== user.id) {
       throw ApiError.forbidden("You can only submit your own quotes");
     }
-    if (existing.status !== QuoteStatus.DRAFT) {
-      throw ApiError.badRequest("Only draft quotes can be submitted");
+    if (!EDITABLE_STATUSES.includes(existing.status)) {
+      throw ApiError.badRequest("Only draft or revision-required quotes can be submitted");
     }
     if (existing.items.length === 0) {
       throw ApiError.badRequest("Cannot submit a quote with no items");
     }
 
     const totals = calculateTotals(
-      existing.items.map((item) => ({ unitPrice: item.unitPrice, quantity: item.quantity }))
+      existing.items.map((item) => ({ unitPrice: item.unitPrice, quantity: item.quantity })),
+      existing.discountPercentage,
+      existing.taxPercentage
     );
 
-    return tx.quote.update({
+    // Discount-governance risk engine decides routing: LOW skips straight to
+    // the Admin master-approval gate; MEDIUM/HIGH go to the Sales Manager
+    // first (Finance only gets involved for HIGH, once the Manager has
+    // signed off). Every path still ends at Admin - see approval.service.ts's
+    // approve transition - since no quote is confirmed without Admin sign-off,
+    // regardless of risk level.
+    const limits = await getCategoryDiscountLimits(tx);
+    const { riskLevel } = assessDiscountRisk(existing.items, totals.discountPercentage, limits);
+
+    const nextStatus =
+      riskLevel === RiskLevel.LOW
+        ? QuoteStatus.PENDING_ADMIN_APPROVAL
+        : QuoteStatus.PENDING_MANAGER_APPROVAL;
+
+    const isResubmission = existing.status === QuoteStatus.REVISION_REQUIRED;
+
+    const quote = await tx.quote.update({
       where: { id: quoteId },
-      data: { status: QuoteStatus.SUBMITTED, ...totals },
+      data: { status: nextStatus, riskLevel, ...totals },
       include: QUOTE_INCLUDE,
     });
+
+    await tx.quoteAuditEntry.create({
+      data: {
+        quoteId,
+        userId: user.id,
+        action: isResubmission ? QuoteAuditAction.RESUBMITTED : QuoteAuditAction.SUBMITTED,
+        note:
+          `Applied ${totals.discountPercentage}% discount, ${totals.taxPercentage}% tax` +
+          (riskLevel === RiskLevel.LOW
+            ? " - no discount ceiling breaches, routed directly to Admin for final approval"
+            : ""),
+      },
+    });
+
+    // Customer-request → quotation lifecycle: submitting the quote is what
+    // takes the originating request out of the active queue for good.
+    if (existing.customerRequestId) {
+      await tx.customerRequest.update({
+        where: { id: existing.customerRequestId },
+        data: { status: CustomerRequestStatus.CONVERTED },
+      });
+    }
+
+    return quote;
   });
 }

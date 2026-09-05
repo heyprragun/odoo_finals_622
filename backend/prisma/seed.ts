@@ -4,8 +4,12 @@ import {
   ProductCategory,
   CustomerTier,
   Role,
+  BillingCycle,
+  SubscriptionStatus,
 } from "@prisma/client";
 import bcrypt from "bcrypt";
+import { addBillingCycleInterval } from "../src/utils/billingCycle";
+import { createInvoicesForApprovedQuote } from "../src/services/invoice.service";
 
 const prisma = new PrismaClient();
 
@@ -56,6 +60,14 @@ const INVENTORY_BY_SKU: Record<string, Record<string, number>> = {
   "SVC-SUPPORT-001": { "Delhi Warehouse": 50, "Mumbai Warehouse": 50, "Bangalore Warehouse": 50 },
 };
 
+// Default discount ceilings used by the approval risk engine. Admin-editable
+// in a future phase; for now these are the seeded defaults.
+const CATEGORY_DISCOUNT_LIMITS: Record<ProductCategory, number> = {
+  [ProductCategory.HARDWARE]: 15,
+  [ProductCategory.SERVICE]: 10,
+  [ProductCategory.SUBSCRIPTION]: 20,
+};
+
 const CUSTOMER_REQUESTS = [
   {
     customerName: "ABC Corporation",
@@ -72,6 +84,34 @@ const CUSTOMER_REQUESTS = [
       { sku: "HW-LAPTOP-001", quantity: 10 },
       { sku: "SVC-SUPPORT-001", quantity: 1 },
     ],
+  },
+] as const;
+
+// Illustrative subscriptions covering all three statuses/cycles so the
+// Subscriptions page has real, varied data from the first run. Not linked to
+// a quote (quoteId stays null) - real ones are auto-created when a quote
+// with a SUBSCRIPTION-category line is approved.
+const SUBSCRIPTION_SEEDS = [
+  {
+    customerName: "ABC Corporation",
+    sku: "SUB-CLOUDPRO-001",
+    quantity: 5,
+    billingCycle: BillingCycle.MONTHLY,
+    status: SubscriptionStatus.ACTIVE,
+  },
+  {
+    customerName: "TechNova",
+    sku: "SUB-CLOUDPRO-001",
+    quantity: 3,
+    billingCycle: BillingCycle.QUARTERLY,
+    status: SubscriptionStatus.PAUSED,
+  },
+  {
+    customerName: "StartupHub",
+    sku: "SUB-CLOUDPRO-001",
+    quantity: 10,
+    billingCycle: BillingCycle.ANNUALLY,
+    status: SubscriptionStatus.CANCELLED,
   },
 ] as const;
 
@@ -136,6 +176,15 @@ async function main() {
     });
   }
 
+  console.log("Seeding category discount limits...");
+  for (const [category, maxDiscountPercentage] of Object.entries(CATEGORY_DISCOUNT_LIMITS)) {
+    await prisma.categoryDiscountLimit.upsert({
+      where: { category: category as ProductCategory },
+      update: { maxDiscountPercentage },
+      create: { category: category as ProductCategory, maxDiscountPercentage },
+    });
+  }
+
   console.log("Seeding warehouses...");
   const warehousesByName = new Map<string, { id: string }>();
   for (const w of WAREHOUSES) {
@@ -186,6 +235,60 @@ async function main() {
     });
   }
 
+  console.log("Seeding demo subscriptions...");
+  for (const sub of SUBSCRIPTION_SEEDS) {
+    const customer = customersByName.get(sub.customerName);
+    const product = productsBySku.get(sub.sku);
+    if (!customer || !product) continue;
+
+    const existing = await prisma.subscription.findFirst({
+      where: { customerId: customer.id, productId: product.id, quoteId: null },
+    });
+    if (existing) {
+      console.log(`  - ${sub.customerName} already has a seeded subscription, skipping`);
+      continue;
+    }
+
+    const startDate = new Date();
+    const nextBillingDate = addBillingCycleInterval(startDate, sub.billingCycle);
+
+    const subscription = await prisma.subscription.create({
+      data: {
+        customerId: customer.id,
+        productId: product.id,
+        quantity: sub.quantity,
+        unitPrice: product.unitPrice,
+        billingCycle: sub.billingCycle,
+        status: sub.status,
+        startDate,
+        nextBillingDate,
+      },
+    });
+
+    await prisma.subscriptionEvent.create({
+      data: {
+        subscriptionId: subscription.id,
+        type: "CREATED",
+        amount: product.unitPrice.mul(sub.quantity),
+        note: "Seed subscription for demo purposes",
+      },
+    });
+
+    if (sub.status === SubscriptionStatus.PAUSED) {
+      await prisma.subscriptionEvent.create({
+        data: { subscriptionId: subscription.id, type: "PAUSED", note: "Paused for seed demo" },
+      });
+    }
+    if (sub.status === SubscriptionStatus.CANCELLED) {
+      await prisma.subscriptionEvent.create({
+        data: { subscriptionId: subscription.id, type: "CANCELLED", note: "Cancelled for seed demo" },
+      });
+    }
+    // Invoice for this standalone (no quoteId) subscription is created in
+    // the dedicated backfill pass below, which runs regardless of whether
+    // the subscription was just created here or already existed.
+  }
+
   console.log("Seeding a draft quote for sales@dealflow.demo...");
   const salesRep = await prisma.user.findUnique({ where: { email: "sales@dealflow.demo" } });
   const abcCorp = customersByName.get("ABC Corporation");
@@ -228,6 +331,41 @@ async function main() {
         },
       });
     }
+  }
+
+  console.log("Backfilling invoices for standalone seed subscriptions...");
+  const standaloneSubs = await prisma.subscription.findMany({
+    where: { quoteId: null },
+    include: { product: true },
+  });
+  for (const sub of standaloneSubs) {
+    const existingInvoice = await prisma.invoice.findFirst({ where: { subscriptionId: sub.id } });
+    if (existingInvoice) continue;
+    const invoiceCount = await prisma.invoice.count();
+    const isPaidDemo = sub.status !== SubscriptionStatus.CANCELLED;
+    await prisma.invoice.create({
+      data: {
+        invoiceNumber: `INV-${String(invoiceCount + 1).padStart(5, "0")}`,
+        customerId: sub.customerId,
+        subscriptionId: sub.id,
+        amount: sub.product.unitPrice.mul(sub.quantity),
+        dueDate: sub.nextBillingDate,
+        status: isPaidDemo ? "PAID" : "UNPAID",
+        paidAt: isPaidDemo ? sub.startDate : null,
+      },
+    });
+  }
+
+  console.log("Backfilling invoices for already-approved quotes...");
+  const approvedQuotes = await prisma.quote.findMany({
+    where: { status: "APPROVED" },
+    select: { id: true },
+  });
+  for (const q of approvedQuotes) {
+    // Idempotent internally (checks for an existing invoice per quote/
+    // subscription before creating) - safe to call for quotes that already
+    // have invoices from a prior seed run or from real usage.
+    await createInvoicesForApprovedQuote(prisma, q.id);
   }
 
   console.log("Seed complete.");

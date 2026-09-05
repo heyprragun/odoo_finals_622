@@ -8,6 +8,10 @@ import customerRoutes from "./routes/customer.routes";
 import customerRequestRoutes from "./routes/customerRequest.routes";
 import inventoryRoutes from "./routes/inventory.routes";
 import quoteRoutes from "./routes/quote.routes";
+import approvalRoutes from "./routes/approval.routes";
+import subscriptionRoutes from "./routes/subscription.routes";
+import invoiceRoutes from "./routes/invoice.routes";
+import warehouseRoutes from "./routes/warehouse.routes";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -27,6 +31,10 @@ export function createApp() {
   app.use("/api/customer-requests", customerRequestRoutes);
   app.use("/api/inventory", inventoryRoutes);
   app.use("/api/quotes", quoteRoutes);
+  app.use("/api/approvals", approvalRoutes);
+  app.use("/api/subscriptions", subscriptionRoutes);
+  app.use("/api/invoices", invoiceRoutes);
+  app.use("/api/warehouses", warehouseRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

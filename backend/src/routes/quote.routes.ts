@@ -14,14 +14,15 @@ import {
 
 const router = Router();
 
-// SALES_REP only in this phase. Manager/Finance approval views and CUSTOMER's
-// own read-only visibility are separate future phases with their own routes.
-router.use(authenticateToken, authorizeRoles(Role.SALES_REP));
+router.use(authenticateToken);
 
-router.get("/", listMyQuotes);
-router.get("/:id", getQuote);
-router.post("/", validateBody(createQuoteSchema), createQuote);
-router.put("/:id", validateBody(updateQuoteSchema), updateQuote);
-router.post("/:id/submit", submitQuote);
+// MANAGER, FINANCE and ADMIN get read-only visibility into every quote
+// (their own "Quotations" screen mirrors the Sales Rep's) - only SALES_REP
+// can create/edit/submit. CUSTOMER's own read-only portal is a future route.
+router.get("/", authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.FINANCE, Role.ADMIN), listMyQuotes);
+router.get("/:id", authorizeRoles(Role.SALES_REP, Role.MANAGER, Role.FINANCE, Role.ADMIN), getQuote);
+router.post("/", authorizeRoles(Role.SALES_REP), validateBody(createQuoteSchema), createQuote);
+router.put("/:id", authorizeRoles(Role.SALES_REP), validateBody(updateQuoteSchema), updateQuote);
+router.post("/:id/submit", authorizeRoles(Role.SALES_REP), submitQuote);
 
 export default router;
