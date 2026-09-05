@@ -1,3 +1,31 @@
+.sales-nav {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1.5rem;
+  background: #fff;
+  border-bottom: 1px solid #e5e5e5;
+  overflow-x: auto;
+}
+
+.sales-nav-tab {
+  padding: 0.85rem 0.9rem;
+  font-size: 0.88rem;
+  color: #555;
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+.sales-nav-tab:hover {
+  color: #1a1a1a;
+}
+
+.sales-nav-tab.active {
+  color: #2f6fed;
+  border-bottom-color: #2f6fed;
+  font-weight: 600;
+}
+
 .sales-page {
   max-width: 960px;
   margin: 0 auto;
@@ -156,18 +184,32 @@
   color: #2f6fed;
 }
 
-.status-IN_REVIEW {
+.status-IN_REVIEW,
+.status-PENDING_MANAGER_APPROVAL,
+.status-PENDING_FINANCE_APPROVAL,
+.status-PENDING_ADMIN_APPROVAL {
   background: #fff4e0;
   color: #b3720a;
 }
 
 .status-QUOTED,
-.status-SUBMITTED {
+.status-SUBMITTED,
+.status-APPROVED,
+.status-ACTIVE,
+.status-PAID {
   background: #e6f6ec;
   color: #1b8a4a;
 }
 
-.status-CANCELLED {
+.status-REVISION_REQUIRED,
+.status-PAUSED,
+.status-UNPAID {
+  background: #fff4e0;
+  color: #b3720a;
+}
+
+.status-CANCELLED,
+.status-REJECTED {
   background: #fdecea;
   color: #b3261e;
 }
@@ -265,6 +307,210 @@
   margin-bottom: 1rem;
 }
 
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.view-toggle-btn {
+  padding: 0.5rem 0.9rem;
+  border: none;
+  background: #fff;
+  font-size: 0.85rem;
+  color: #555;
+  cursor: pointer;
+}
+
+.view-toggle-btn + .view-toggle-btn {
+  border-left: 1px solid #ccc;
+}
+
+.view-toggle-btn.active {
+  background: #2f6fed;
+  color: #fff;
+}
+
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 1rem;
+  overflow-x: auto;
+  align-items: start;
+}
+
+.kanban-column {
+  background: #eef0f3;
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-width: 220px;
+}
+
+.kanban-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #444;
+  padding: 0.25rem 0.35rem 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.kanban-count {
+  background: #dfe3e8;
+  color: #444;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.kanban-column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 40px;
+}
+
+.kanban-card {
+  display: block;
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.75rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  text-decoration: none;
+  color: #1a1a1a;
+}
+
+.kanban-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.kanban-card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.kanban-card-customer {
+  font-size: 0.82rem;
+  color: #555;
+  margin-bottom: 0.4rem;
+}
+
+.kanban-card-total {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #2f6fed;
+}
+
+.page-subtitle {
+  margin: 0.25rem 0 0;
+  color: #666;
+  font-size: 0.88rem;
+}
+
+.filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #444;
+  cursor: pointer;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: #f4f5f7;
+}
+
+.risk-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.risk-LOW {
+  background: #e6f6ec;
+  color: #1b8a4a;
+}
+
+.risk-MEDIUM {
+  background: #fff4e0;
+  color: #b3720a;
+}
+
+.risk-HIGH {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.approval-badges {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.over-limit {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.within-limit {
+  color: #1b8a4a;
+}
+
+.explainer-text {
+  color: #666;
+  font-size: 0.85rem;
+  margin: 1rem 0 0;
+}
+
+.workflow-stepper {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.workflow-step-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.workflow-step {
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  background: #eef0f3;
+  color: #777;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.workflow-step.done {
+  background: #e6f6ec;
+  color: #1b8a4a;
+}
+
+.workflow-step.current {
+  background: #2f6fed;
+  color: #fff;
+}
+
+.workflow-arrow {
+  color: #aaa;
+}
+
 .recommendations-panel {
   border: 1px dashed #ccc;
   border-radius: 8px;
@@ -272,4 +518,63 @@
   text-align: center;
   color: #888;
   font-size: 0.85rem;
+}
+
+.dealhealth-banners {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.dealhealth-banner {
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  border-left: 4px solid transparent;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.dealhealth-banner-count {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.dealhealth-banner-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-top: 0.15rem;
+}
+
+.dealhealth-banner-desc {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.dealhealth-banner.stalled {
+  border-left-color: #b3720a;
+}
+
+.dealhealth-banner.stalled .dealhealth-banner-count,
+.dealhealth-banner.stalled .dealhealth-banner-label {
+  color: #b3720a;
+}
+
+.dealhealth-banner.anomaly {
+  border-left-color: #b3261e;
+}
+
+.dealhealth-banner.anomaly .dealhealth-banner-count,
+.dealhealth-banner.anomaly .dealhealth-banner-label {
+  color: #b3261e;
+}
+
+.dealhealth-banner.slippage {
+  border-left-color: #2f6fed;
+}
+
+.dealhealth-banner.slippage .dealhealth-banner-count,
+.dealhealth-banner.slippage .dealhealth-banner-label {
+  color: #2f6fed;
 }

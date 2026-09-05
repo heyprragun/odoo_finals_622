@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
+import { useAuth } from "../../context/AuthContext";
 import { getCustomerRequest } from "../../api/customerRequests";
 import { createQuote } from "../../api/quotes";
 import type { CustomerRequestDetail as CustomerRequestDetailType } from "../../types/sales";
@@ -13,6 +14,8 @@ function formatCurrency(amount: number) {
 export function CustomerRequestDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSalesRep = user?.role === "SALES_REP";
   const [request, setRequest] = useState<CustomerRequestDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -35,6 +38,8 @@ export function CustomerRequestDetail() {
     setError(null);
     setIsCreating(true);
     try {
+      // If this request already has a linked quote, the backend returns it
+      // instead of creating a duplicate - either way we land on the builder.
       const quote = await createQuote({ customerRequestId: id });
       navigate(`/sales/quotes/${quote.id}`);
     } catch (err) {
@@ -99,13 +104,24 @@ export function CustomerRequestDetail() {
           </div>
 
           <div className="sales-actions">
-            <button
-              className="sales-btn sales-btn-primary"
-              onClick={handleCreateQuote}
-              disabled={isCreating || request.status === "CANCELLED"}
-            >
-              {isCreating ? "Creating..." : "Create Quote"}
-            </button>
+            {request.quote ? (
+              <button
+                className="sales-btn sales-btn-primary"
+                onClick={() => navigate(`/sales/quotes/${request.quote!.id}`)}
+              >
+                View Quote ({request.quote.quoteNumber})
+              </button>
+            ) : (
+              isSalesRep && (
+                <button
+                  className="sales-btn sales-btn-primary"
+                  onClick={handleCreateQuote}
+                  disabled={isCreating || request.status === "CANCELLED"}
+                >
+                  {isCreating ? "Creating..." : "Create Quote"}
+                </button>
+              )
+            )}
           </div>
         </>
       )}

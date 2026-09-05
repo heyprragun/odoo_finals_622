@@ -6,11 +6,15 @@ export interface CreateQuotePayload {
   customerRequestId?: string;
   notes?: string;
   items?: QuoteItemInput[];
+  discountPercentage?: number;
+  taxPercentage?: number;
 }
 
 export interface UpdateQuotePayload {
   notes?: string;
   items: QuoteItemInput[];
+  discountPercentage?: number;
+  taxPercentage?: number;
 }
 
 export async function listMyQuotes() {

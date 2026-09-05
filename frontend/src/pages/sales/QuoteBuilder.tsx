@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import axios from "axios";
+import { useAuth } from "../../context/AuthContext";
 import { getQuote, submitQuote, updateQuote } from "../../api/quotes";
 import { searchProducts } from "../../api/products";
 import { getProductAvailability } from "../../api/inventory";
@@ -28,6 +29,7 @@ function errorMessage(err: unknown, fallback: string) {
 
 export function QuoteBuilder() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [items, setItems] = useState<BuilderItem[]>([]);
@@ -41,9 +43,18 @@ export function QuoteBuilder() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [searchResults, setSearchResults] = useState<Product[]>([]);
 
+  const [discountPercentage, setDiscountPercentage] = useState(0);
+  const [taxPercentage, setTaxPercentage] = useState(0);
+
   const [availability, setAvailability] = useState<Record<string, WarehouseAvailability[] | "loading" | "error">>({});
 
-  const isEditable = quote?.status === "DRAFT";
+  // Viewing is fine for a Manager (their Quotations screen mirrors the Sales
+  // Rep's), but editing/submitting is still the owning Sales Rep's alone -
+  // the backend enforces this too, this just keeps the UI from offering
+  // controls that would 403.
+  const isOwnQuote = !!quote && !!user && quote.salesRepId === user.id;
+  const isEditable =
+    isOwnQuote && (quote?.status === "DRAFT" || quote?.status === "REVISION_REQUIRED");
 
   useEffect(() => {
     if (!id) return;
@@ -60,6 +71,8 @@ export function QuoteBuilder() {
             quantity: item.quantity,
           }))
         );
+        setDiscountPercentage(q.discountPercentage);
+        setTaxPercentage(q.taxPercentage);
       })
       .catch((err) => setLoadError(errorMessage(err, "Failed to load this quote.")));
   }, [id]);
@@ -124,12 +137,18 @@ export function QuoteBuilder() {
   }
 
   const localSubtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const localDiscountAmount = (localSubtotal * discountPercentage) / 100;
+  const localTaxableAmount = localSubtotal - localDiscountAmount;
+  const localTaxAmount = (localTaxableAmount * taxPercentage) / 100;
+  const localTotal = localTaxableAmount + localTaxAmount;
 
   async function persistItems(): Promise<Quote> {
     if (!id) throw new Error("Missing quote id");
     const updated = await updateQuote(id, {
       notes: quote?.notes ?? undefined,
       items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+      discountPercentage,
+      taxPercentage,
     });
     setQuote(updated);
     setItems(
@@ -142,6 +161,8 @@ export function QuoteBuilder() {
         quantity: item.quantity,
       }))
     );
+    setDiscountPercentage(updated.discountPercentage);
+    setTaxPercentage(updated.taxPercentage);
     return updated;
   }
 
@@ -349,16 +370,58 @@ export function QuoteBuilder() {
           <span>{formatCurrency(isEditable ? localSubtotal : quote.subtotal)}</span>
         </div>
         <div className="quote-summary-row">
-          <span>Discount</span>
-          <span>{formatCurrency(0)}</span>
+          <span>
+            Discount
+            {isEditable ? (
+              <span className="qty-control" style={{ marginLeft: "0.6rem" }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={discountPercentage}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setDiscountPercentage(Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0);
+                  }}
+                  style={{ width: 64 }}
+                />
+                <span>%</span>
+              </span>
+            ) : (
+              ` (${quote.discountPercentage}%)`
+            )}
+          </span>
+          <span>−{formatCurrency(isEditable ? localDiscountAmount : quote.discountAmount)}</span>
         </div>
         <div className="quote-summary-row">
-          <span>Tax</span>
-          <span>{formatCurrency(0)}</span>
+          <span>
+            Tax
+            {isEditable ? (
+              <span className="qty-control" style={{ marginLeft: "0.6rem" }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={taxPercentage}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setTaxPercentage(Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0);
+                  }}
+                  style={{ width: 64 }}
+                />
+                <span>%</span>
+              </span>
+            ) : (
+              ` (${quote.taxPercentage}%)`
+            )}
+          </span>
+          <span>{formatCurrency(isEditable ? localTaxAmount : quote.taxAmount)}</span>
         </div>
         <div className="quote-summary-row total">
           <span>Total</span>
-          <span>{formatCurrency(isEditable ? localSubtotal : quote.totalAmount)}</span>
+          <span>{formatCurrency(isEditable ? localTotal : quote.totalAmount)}</span>
         </div>
         <p style={{ color: "#888", fontSize: "0.78rem", marginTop: "0.5rem" }}>
           Final totals are always recalculated by the server on save.

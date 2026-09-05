@@ -1,6 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { SalesRepDashboard } from "./sales/SalesRepDashboard";
+import { SalesNav } from "./sales/SalesNav";
+
+// Roles that can reach the shared nav (Approvals in particular needs
+// Manager/Finance/Admin access, not just Sales Rep).
+const NAV_ROLES = ["SALES_REP", "MANAGER", "FINANCE", "ADMIN"];
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -13,6 +18,7 @@ export function Dashboard() {
 
   return (
     <div>
+      {user && NAV_ROLES.includes(user.role) && <SalesNav />}
       <div
         style={{
           maxWidth: 960,
@@ -42,7 +48,7 @@ export function Dashboard() {
         </button>
       </div>
 
-      {user?.role === "SALES_REP" ? (
+      {user && NAV_ROLES.includes(user.role) ? (
         <SalesRepDashboard />
       ) : (
         <div style={{ maxWidth: 480, margin: "4rem auto", textAlign: "center" }}>
