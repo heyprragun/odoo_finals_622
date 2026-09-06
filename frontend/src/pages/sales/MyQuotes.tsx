@@ -15,20 +15,39 @@ function formatCurrency(amount: number) {
 
 type ViewMode = "kanban" | "table";
 
-// Only DRAFT/SUBMITTED exist today. APPROVED/CONFIRMED are future statuses
-// (manager/finance approval, customer confirmation) - their columns are real
-// UI, just always empty until those phases add the underlying quote states.
-type KanbanColumnKey = "DRAFT" | "PENDING" | "APPROVED" | "CONFIRMED";
+// Every real QuoteStatus value maps to exactly one column: still being
+// built (DRAFT), awaiting some decision or rework (SUBMITTED and every
+// PENDING_*_APPROVAL stage, plus REVISION_REQUIRED - still editable/
+// resubmittable, so it belongs with "in flight" rather than "done"),
+// confirmed (APPROVED - the only real terminal success state today), or
+// closed without success (REJECTED/CANCELLED). There is no separate
+// "customer confirmed" status in this app - APPROVED already is the
+// customer's own terminal "done" state (see customerPortal.service.ts's
+// deriveOrderStatus) - so the fourth column covers closed-out orders
+// instead of a status that doesn't exist.
+type KanbanColumnKey = "DRAFT" | "PENDING" | "APPROVED" | "CLOSED";
 
 const COLUMNS: { key: KanbanColumnKey; label: string }[] = [
   { key: "DRAFT", label: "Draft" },
   { key: "PENDING", label: "Pending" },
   { key: "APPROVED", label: "Approved" },
-  { key: "CONFIRMED", label: "Confirmed" },
+  { key: "CLOSED", label: "Closed" },
 ];
 
 function columnForStatus(status: QuoteStatus): KanbanColumnKey {
-  return status === "DRAFT" ? "DRAFT" : "PENDING";
+  switch (status) {
+    case "DRAFT":
+      return "DRAFT";
+    case "APPROVED":
+      return "APPROVED";
+    case "REJECTED":
+    case "CANCELLED":
+      return "CLOSED";
+    default:
+      // SUBMITTED, PENDING_MANAGER_APPROVAL, PENDING_FINANCE_APPROVAL,
+      // PENDING_ADMIN_APPROVAL, REVISION_REQUIRED
+      return "PENDING";
+  }
 }
 
 function getSortValue(quote: Quote, key: string): string | number | null {
