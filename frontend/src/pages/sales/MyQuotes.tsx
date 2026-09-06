@@ -3,6 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
 import { listMyQuotes } from "../../api/quotes";
+import { useSortableTable } from "../../hooks/useSortableTable";
+import { useTableFilter } from "../../hooks/useTableFilter";
+import { SortableHeader } from "../../components/SortableHeader";
 import type { Quote, QuoteStatus } from "../../types/sales";
 import "./sales.css";
 
@@ -28,6 +31,23 @@ function columnForStatus(status: QuoteStatus): KanbanColumnKey {
   return status === "DRAFT" ? "DRAFT" : "PENDING";
 }
 
+function getSortValue(quote: Quote, key: string): string | number | null {
+  switch (key) {
+    case "quoteNumber":
+      return quote.quoteNumber;
+    case "customer":
+      return quote.customer.name;
+    case "status":
+      return quote.status;
+    case "total":
+      return quote.totalAmount;
+    case "updated":
+      return new Date(quote.updatedAt).getTime();
+    default:
+      return null;
+  }
+}
+
 export function MyQuotes() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -35,6 +55,12 @@ export function MyQuotes() {
   const [quotes, setQuotes] = useState<Quote[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("kanban");
+
+  const { filtered, filterText, setFilterText } = useTableFilter(
+    quotes ?? [],
+    (q) => `${q.quoteNumber} ${q.customer.name} ${q.status}`
+  );
+  const { sorted, sortKey, sortDirection, toggleSort } = useSortableTable(filtered, getSortValue, "updated", "desc");
 
   useEffect(() => {
     listMyQuotes()
@@ -122,38 +148,80 @@ export function MyQuotes() {
 
       {quotes !== null && quotes.length > 0 && viewMode === "table" && (
         <div className="sales-card">
-          <table className="sales-table">
-            <thead>
-              <tr>
-                <th>Quote #</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Total</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {quotes.map((q) => (
-                <tr key={q.id}>
-                  <td>{q.quoteNumber}</td>
-                  <td>
-                    {q.customer.name} <span className="tier-badge">{q.customer.tier}</span>
-                  </td>
-                  <td>
-                    <span className={`status-badge status-${q.status}`}>{q.status}</span>
-                  </td>
-                  <td>{formatCurrency(q.totalAmount)}</td>
-                  <td>{new Date(q.updatedAt).toLocaleDateString()}</td>
-                  <td>
-                    <Link className="sales-btn" to={`/sales/quotes/${q.id}`}>
-                      {q.status === "DRAFT" ? "Edit" : "View"}
-                    </Link>
-                  </td>
+          <div className="table-toolbar">
+            <input
+              type="text"
+              placeholder="Filter by quote #, customer, or status..."
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+            />
+          </div>
+          {sorted.length === 0 ? (
+            <p className="sales-empty">No quotes match this filter.</p>
+          ) : (
+            <table className="sales-table">
+              <thead>
+                <tr>
+                  <SortableHeader
+                    label="Quote #"
+                    sortKey="quoteNumber"
+                    activeKey={sortKey}
+                    direction={sortDirection}
+                    onSort={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Customer"
+                    sortKey="customer"
+                    activeKey={sortKey}
+                    direction={sortDirection}
+                    onSort={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Status"
+                    sortKey="status"
+                    activeKey={sortKey}
+                    direction={sortDirection}
+                    onSort={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Total"
+                    sortKey="total"
+                    activeKey={sortKey}
+                    direction={sortDirection}
+                    onSort={toggleSort}
+                  />
+                  <SortableHeader
+                    label="Updated"
+                    sortKey="updated"
+                    activeKey={sortKey}
+                    direction={sortDirection}
+                    onSort={toggleSort}
+                  />
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sorted.map((q) => (
+                  <tr key={q.id}>
+                    <td>{q.quoteNumber}</td>
+                    <td>
+                      {q.customer.name} <span className="tier-badge">{q.customer.tier}</span>
+                    </td>
+                    <td>
+                      <span className={`status-badge status-${q.status}`}>{q.status}</span>
+                    </td>
+                    <td>{formatCurrency(q.totalAmount)}</td>
+                    <td>{new Date(q.updatedAt).toLocaleDateString()}</td>
+                    <td>
+                      <Link className="sales-btn" to={`/sales/quotes/${q.id}`}>
+                        {q.status === "DRAFT" ? "Edit" : "View"}
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>

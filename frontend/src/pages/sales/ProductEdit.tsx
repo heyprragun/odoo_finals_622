@@ -170,38 +170,59 @@ export function ProductEdit() {
       <div className="sales-card">
         <h2>Product Details</h2>
         <div className="product-search-row">
-          <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input type="text" placeholder="SKU" value={sku} onChange={(e) => setSku(e.target.value)} />
-          <select value={category} onChange={(e) => setCategory(e.target.value as ProductCategory)}>
-            <option value="HARDWARE">Hardware</option>
-            <option value="SERVICE">Service</option>
-            <option value="SUBSCRIPTION">Subscription</option>
-          </select>
+          <div className="field-group">
+            <label htmlFor="product-name">Product Name</label>
+            <input id="product-name" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field-group">
+            <label htmlFor="product-sku">SKU</label>
+            <input id="product-sku" type="text" value={sku} onChange={(e) => setSku(e.target.value)} />
+          </div>
+          <div className="field-group">
+            <label htmlFor="product-category">Category</label>
+            <select
+              id="product-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value as ProductCategory)}
+            >
+              <option value="HARDWARE">Hardware</option>
+              <option value="SERVICE">Service</option>
+              <option value="SUBSCRIPTION">Subscription</option>
+            </select>
+          </div>
         </div>
         <div className="product-search-row">
-          <input
-            type="text"
-            placeholder="Description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            style={{ flex: 1 }}
-          />
+          <div className="field-group" style={{ flex: 1 }}>
+            <label htmlFor="product-description">Description</label>
+            <input
+              id="product-description"
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
         </div>
         <div className="product-search-row">
-          <input
-            type="number"
-            min={0}
-            placeholder="Selling Price"
-            value={unitPrice}
-            onChange={(e) => setUnitPrice(e.target.value)}
-          />
-          <input
-            type="number"
-            min={0}
-            placeholder="Cost"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-          />
+          <div className="field-group">
+            <label htmlFor="product-selling-price">Selling Price</label>
+            <input
+              id="product-selling-price"
+              type="number"
+              min={0}
+              value={unitPrice}
+              onChange={(e) => setUnitPrice(e.target.value)}
+            />
+          </div>
+          <div className="field-group">
+            <label htmlFor="product-cost-price">Cost Price</label>
+            <input
+              id="product-cost-price"
+              type="number"
+              min={0}
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+            />
+          </div>
         </div>
         <div className="sales-actions">
           <button className="sales-btn sales-btn-primary" onClick={handleSave} disabled={isSaving}>

@@ -1,6 +1,65 @@
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Segoe UI Variable", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+
+  /* Ink - the monochrome accent for every action/active state (buttons,
+     active nav tab, active toggle, current workflow step, stat numbers).
+     Kept deliberately black/near-black rather than a brand hue - color is
+     reserved for actual meaning (success/warning/danger/info) below. */
+  --color-primary: #16181d;
+  --color-primary-hover: #303339;
+  --color-primary-active: #000000;
+  --color-primary-light: #eef0f2;
+
+  /* Semantic */
+  --color-success: #1b8a4a;
+  --color-success-bg: #e6f6ec;
+  --color-warning: #b3720a;
+  --color-warning-bg: #fff4e0;
+  --color-danger: #b3261e;
+  --color-danger-bg: #fdecea;
+  --color-danger-border: #e5b6b1;
+  /* Distinct from --color-primary on purpose - used for plain hyperlink-
+     style text (never buttons/active-state, which stay the monochrome ink
+     above) and as a third, purely-informational category color alongside
+     warning/danger (Deal Health's "delivery slippage" flag). Links vs.
+     actions is a deliberate distinction: blue means "navigate," black
+     means "do." */
+  --color-info: #2f5fd7;
+  --color-info-hover: #2347ab;
+  --color-info-bg: #eef2fc;
+
+  /* Neutrals */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #dde1e6;
+  --color-border-strong: #c7ccd3;
+  --color-text: #1a1d24;
+  --color-text-muted: #5b6270;
+  --color-text-faint: #8b919c;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 16px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 10px 28px rgba(16, 24, 40, 0.14), 0 4px 8px rgba(16, 24, 40, 0.06);
+
+  /* Shape & motion */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --transition-fast: 130ms var(--ease-premium);
+  --transition-base: 200ms var(--ease-premium);
+  /* A settling, decelerated curve (ease-out-expo family) rather than plain
+     linear/ease - reads as considered/"designed" instead of a default
+     browser transition, without being bouncy or playful. */
+  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
+
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -10,6 +69,43 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f4f5f7;
-  color: #1a1a1a;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+a {
+  color: var(--color-info);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

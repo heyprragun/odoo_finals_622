@@ -9,15 +9,24 @@ import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
 import { addBillingCycleInterval, cycleLengthInDays } from "../utils/billingCycle";
 
+// A line becomes a recurring subscription either because the product
+// itself is SUBSCRIPTION-category, or because the whole quote was raised
+// through the portal's "Recurring Plans" tab (isRecurring) - in the latter
+// case every line on the quote is billed on the customer's chosen cycle,
+// regardless of the underlying product's own category.
+export function isSubscriptionLine(
+  quote: { isRecurring: boolean },
+  item: { product: { category: ProductCategory } }
+): boolean {
+  return quote.isRecurring || item.product.category === ProductCategory.SUBSCRIPTION;
+}
+
 /**
  * Called once a quote reaches APPROVED - from the auto-approve path in
  * quote.service.ts (LOW risk) or the final Finance approval in
  * approval.service.ts (MEDIUM/HIGH risk). Creates one Subscription per
- * SUBSCRIPTION-category line item. Idempotent: safe to call more than once
- * for the same quote.
- *
- * There's no per-line billing-cycle picker in the Quote Builder yet, so
- * MONTHLY is the default until that's added.
+ * subscription line (see isSubscriptionLine above). Idempotent: safe to
+ * call more than once for the same quote.
  */
 export async function createSubscriptionsForApprovedQuote(
   tx: Prisma.TransactionClient,
@@ -25,13 +34,37 @@ export async function createSubscriptionsForApprovedQuote(
 ) {
   const quote = await tx.quote.findUnique({
     where: { id: quoteId },
-    include: { items: { include: { product: true } } },
+    include: {
+      items: { include: { product: true } },
+      customerRequest: { select: { modifiesSubscriptionId: true } },
+    },
   });
   if (!quote) return;
 
-  const subscriptionItems = quote.items.filter(
-    (item) => item.product.category === ProductCategory.SUBSCRIPTION
-  );
+  // A "Change Subscription Plan" request (see customerPortal.service.ts's
+  // createMyRequest, CustomerRequest.modifiesSubscriptionId): this quote's
+  // approval is what actually completes the plan change - the old
+  // subscription is superseded by whichever fresh one gets created below.
+  // Guarded on still ACTIVE/PAUSED so re-running this (idempotency) or a
+  // customer having already cancelled it separately is a harmless no-op.
+  const oldSubscriptionId = quote.customerRequest?.modifiesSubscriptionId;
+  if (oldSubscriptionId) {
+    const result = await tx.subscription.updateMany({
+      where: { id: oldSubscriptionId, status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED] } },
+      data: { status: SubscriptionStatus.CANCELLED },
+    });
+    if (result.count > 0) {
+      await tx.subscriptionEvent.create({
+        data: {
+          subscriptionId: oldSubscriptionId,
+          type: SubscriptionEventType.CANCELLED,
+          note: `Replaced by a plan change - see quote ${quote.quoteNumber}`,
+        },
+      });
+    }
+  }
+
+  const subscriptionItems = quote.items.filter((item) => isSubscriptionLine(quote, item));
 
   for (const item of subscriptionItems) {
     const existing = await tx.subscription.findFirst({
@@ -39,7 +72,7 @@ export async function createSubscriptionsForApprovedQuote(
     });
     if (existing) continue;
 
-    const billingCycle = BillingCycle.MONTHLY;
+    const billingCycle = quote.billingCycle ?? BillingCycle.MONTHLY;
     const nextBillingDate = addBillingCycleInterval(new Date(), billingCycle);
 
     const subscription = await tx.subscription.create({
@@ -275,3 +308,4 @@ export async function changeSubscriptionQuantity(id: string, newQuantity: number
     return sub.customerId;
   });
 }
+

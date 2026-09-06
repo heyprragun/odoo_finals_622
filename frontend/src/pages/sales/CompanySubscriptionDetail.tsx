@@ -9,7 +9,16 @@ import {
   pauseSubscription,
   resumeSubscription,
 } from "../../api/subscriptions";
-import type { CompanySubscriptionDetail as CompanyDetailType } from "../../types/sales";
+import { decideTierChangeRequest, listTierChangeRequests } from "../../api/customerTierChange";
+import { useSortableTable } from "../../hooks/useSortableTable";
+import { SortableHeader } from "../../components/SortableHeader";
+import type {
+  CompanySubscriptionDetail as CompanyDetailType,
+  OneTimeOrder,
+  PendingTierChangeRequest,
+  RecurringOrder,
+  SubscriptionListItem,
+} from "../../types/sales";
 import "./sales.css";
 
 function formatCurrency(amount: number) {
@@ -27,6 +36,53 @@ function formatEventType(type: string) {
     .join(" ");
 }
 
+function getSubscriptionSortValue(sub: SubscriptionListItem, key: string): string | number | null {
+  switch (key) {
+    case "product":
+      return sub.product.name;
+    case "quantity":
+      return sub.quantity;
+    case "cycle":
+      return sub.billingCycle;
+    case "nextBilling":
+      return new Date(sub.nextBillingDate).getTime();
+    case "status":
+      return sub.status;
+    default:
+      return null;
+  }
+}
+
+function getOneTimeOrderSortValue(order: OneTimeOrder, key: string): string | number | null {
+  switch (key) {
+    case "quoteNumber":
+      return order.quoteNumber;
+    case "date":
+      return new Date(order.date).getTime();
+    case "products":
+      return order.products;
+    case "amount":
+      return order.amount;
+    default:
+      return null;
+  }
+}
+
+function getRecurringOrderSortValue(order: RecurringOrder, key: string): string | number | null {
+  switch (key) {
+    case "date":
+      return new Date(order.createdAt).getTime();
+    case "product":
+      return order.productName;
+    case "event":
+      return order.type;
+    case "amount":
+      return order.amount;
+    default:
+      return null;
+  }
+}
+
 export function CompanySubscriptionDetail() {
   const { customerId } = useParams<{ customerId: string }>();
   const { user } = useAuth();
@@ -37,8 +93,15 @@ export function CompanySubscriptionDetail() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingQtyId, setEditingQtyId] = useState<string | null>(null);
   const [qtyInput, setQtyInput] = useState("");
+  const [tierRequests, setTierRequests] = useState<PendingTierChangeRequest[] | null>(null);
+  const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const canManage = user?.role === "FINANCE" || user?.role === "ADMIN";
+  const isAdmin = user?.role === "ADMIN";
+
+  const subsSort = useSortableTable(detail?.subscriptions ?? [], getSubscriptionSortValue, "product");
+  const oneTimeSort = useSortableTable(detail?.oneTimeOrders ?? [], getOneTimeOrderSortValue, "date", "desc");
+  const recurringSort = useSortableTable(detail?.recurringOrders ?? [], getRecurringOrderSortValue, "date", "desc");
 
   function load() {
     if (!customerId) return;
@@ -53,7 +116,33 @@ export function CompanySubscriptionDetail() {
       );
   }
 
+  function loadTierRequests() {
+    if (!isAdmin || !customerId) return;
+    listTierChangeRequests()
+      .then((all) => setTierRequests(all.filter((r) => r.customer.id === customerId)))
+      .catch(() => setTierRequests([]));
+  }
+
   useEffect(load, [customerId]);
+  useEffect(loadTierRequests, [customerId, isAdmin]);
+
+  async function handleDecide(requestId: string, decision: "APPROVE" | "REJECT") {
+    setActionError(null);
+    setDecidingId(requestId);
+    try {
+      await decideTierChangeRequest(requestId, decision);
+      loadTierRequests();
+      load();
+    } catch (err) {
+      setActionError(
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "Failed to decide this request."
+      );
+    } finally {
+      setDecidingId(null);
+    }
+  }
 
   async function runAction(subscriptionId: string, action: () => Promise<CompanyDetailType>) {
     setActionError(null);
@@ -125,16 +214,16 @@ export function CompanySubscriptionDetail() {
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Product</th>
-                <th>Quantity</th>
-                <th>Buying Cycle</th>
-                <th>Next Billing Date</th>
-                <th>Status</th>
+                <SortableHeader label="Product" sortKey="product" activeKey={subsSort.sortKey} direction={subsSort.sortDirection} onSort={subsSort.toggleSort} />
+                <SortableHeader label="Quantity" sortKey="quantity" activeKey={subsSort.sortKey} direction={subsSort.sortDirection} onSort={subsSort.toggleSort} />
+                <SortableHeader label="Buying Cycle" sortKey="cycle" activeKey={subsSort.sortKey} direction={subsSort.sortDirection} onSort={subsSort.toggleSort} />
+                <SortableHeader label="Next Billing Date" sortKey="nextBilling" activeKey={subsSort.sortKey} direction={subsSort.sortDirection} onSort={subsSort.toggleSort} />
+                <SortableHeader label="Status" sortKey="status" activeKey={subsSort.sortKey} direction={subsSort.sortDirection} onSort={subsSort.toggleSort} />
                 {canManage && <th></th>}
               </tr>
             </thead>
             <tbody>
-              {detail.subscriptions.map((sub) => (
+              {subsSort.sorted.map((sub) => (
                 <tr key={sub.id}>
                   <td>{sub.product.name}</td>
                   <td>
@@ -239,6 +328,61 @@ export function CompanySubscriptionDetail() {
         )}
       </div>
 
+      {isAdmin && (
+        <div className="sales-card">
+          <h2>Pending Plan Tier Change Requests</h2>
+          {tierRequests === null ? (
+            <p className="sales-empty">Loading...</p>
+          ) : tierRequests.length === 0 ? (
+            <p className="sales-empty">No pending requests for this company.</p>
+          ) : (
+            <table className="sales-table">
+              <thead>
+                <tr>
+                  <th>Current Tier</th>
+                  <th>Requested Tier</th>
+                  <th>Type</th>
+                  <th>Customer Note</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {tierRequests.map((req) => (
+                  <tr key={req.id}>
+                    <td>
+                      <span className="tier-badge">{req.customer.currentTier}</span>
+                    </td>
+                    <td>
+                      <span className="tier-badge">{req.requestedTier}</span>
+                    </td>
+                    <td>{req.type}</td>
+                    <td>{req.customerNote ?? "—"}</td>
+                    <td>
+                      <div className="sales-actions">
+                        <button
+                          className="sales-btn sales-btn-primary"
+                          disabled={decidingId === req.id}
+                          onClick={() => handleDecide(req.id, "APPROVE")}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="sales-btn sales-btn-danger"
+                          disabled={decidingId === req.id}
+                          onClick={() => handleDecide(req.id, "REJECT")}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       <div className="sales-card">
         <h2>One-Time Orders</h2>
         {detail.oneTimeOrders.length === 0 ? (
@@ -247,14 +391,14 @@ export function CompanySubscriptionDetail() {
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Quote #</th>
-                <th>Date</th>
-                <th>Products</th>
-                <th>Amount</th>
+                <SortableHeader label="Quote #" sortKey="quoteNumber" activeKey={oneTimeSort.sortKey} direction={oneTimeSort.sortDirection} onSort={oneTimeSort.toggleSort} />
+                <SortableHeader label="Date" sortKey="date" activeKey={oneTimeSort.sortKey} direction={oneTimeSort.sortDirection} onSort={oneTimeSort.toggleSort} />
+                <SortableHeader label="Products" sortKey="products" activeKey={oneTimeSort.sortKey} direction={oneTimeSort.sortDirection} onSort={oneTimeSort.toggleSort} />
+                <SortableHeader label="Amount" sortKey="amount" activeKey={oneTimeSort.sortKey} direction={oneTimeSort.sortDirection} onSort={oneTimeSort.toggleSort} />
               </tr>
             </thead>
             <tbody>
-              {detail.oneTimeOrders.map((order) => (
+              {oneTimeSort.sorted.map((order) => (
                 <tr key={order.quoteId}>
                   <td>{order.quoteNumber}</td>
                   <td>{new Date(order.date).toLocaleDateString()}</td>
@@ -275,15 +419,15 @@ export function CompanySubscriptionDetail() {
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Product</th>
-                <th>Event</th>
-                <th>Amount</th>
+                <SortableHeader label="Date" sortKey="date" activeKey={recurringSort.sortKey} direction={recurringSort.sortDirection} onSort={recurringSort.toggleSort} />
+                <SortableHeader label="Product" sortKey="product" activeKey={recurringSort.sortKey} direction={recurringSort.sortDirection} onSort={recurringSort.toggleSort} />
+                <SortableHeader label="Event" sortKey="event" activeKey={recurringSort.sortKey} direction={recurringSort.sortDirection} onSort={recurringSort.toggleSort} />
+                <SortableHeader label="Amount" sortKey="amount" activeKey={recurringSort.sortKey} direction={recurringSort.sortDirection} onSort={recurringSort.toggleSort} />
                 <th>Note</th>
               </tr>
             </thead>
             <tbody>
-              {detail.recurringOrders.map((order) => (
+              {recurringSort.sorted.map((order) => (
                 <tr key={order.id}>
                   <td>{new Date(order.createdAt).toLocaleDateString()}</td>
                   <td>{order.productName}</td>

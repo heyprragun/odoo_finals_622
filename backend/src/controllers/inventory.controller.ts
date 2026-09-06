@@ -62,7 +62,23 @@ export async function getStockAllocation(req: Request, res: Response, next: Next
       throw ApiError.notFound("Product not found");
     }
 
-    const result = await suggestStockAllocation(productId, quantity);
+    const excludeQuoteItemId =
+      typeof req.query.excludeQuoteItemId === "string" ? req.query.excludeQuoteItemId : undefined;
+    if (excludeQuoteItemId && !isUuid(excludeQuoteItemId)) {
+      throw ApiError.badRequest("Invalid excludeQuoteItemId");
+    }
+    const destinationLocation =
+      typeof req.query.destinationLocation === "string" && req.query.destinationLocation.trim().length > 0
+        ? req.query.destinationLocation
+        : undefined;
+
+    const result = await suggestStockAllocation(
+      productId,
+      quantity,
+      undefined,
+      excludeQuoteItemId,
+      destinationLocation
+    );
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);

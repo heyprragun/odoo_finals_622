@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError";
 import { assessDiscountRisk, getDiscountGovernanceContext } from "./discountGovernance.service";
 import { createSubscriptionsForApprovedQuote } from "./subscription.service";
 import { createInvoicesForApprovedQuote } from "./invoice.service";
+import { releaseAllocationsForQuote } from "./inventory.service";
 
 interface AuthenticatedUser {
   id: string;
@@ -268,6 +269,12 @@ async function performAction(
     if (nextStatus === QuoteStatus.APPROVED) {
       await createSubscriptionsForApprovedQuote(tx, quoteId);
       await createInvoicesForApprovedQuote(tx, quoteId);
+    }
+
+    // An approver's rejection means this reservation will never be
+    // fulfilled - free the stock back up for other orders.
+    if (nextStatus === QuoteStatus.REJECTED) {
+      await releaseAllocationsForQuote(tx, quoteId);
     }
   });
 

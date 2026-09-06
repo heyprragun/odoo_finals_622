@@ -24,6 +24,10 @@ export async function getCustomerRequestById(id: string) {
       customer: true,
       items: { include: { product: true } },
       quote: { select: { id: true, quoteNumber: true, status: true } },
+      // Present only for a "Change Subscription Plan" request - lets the
+      // Sales Rep see which existing subscription this replaces and what
+      // its current billing cycle is.
+      modifiesSubscription: { include: { product: true } },
     },
   });
 }

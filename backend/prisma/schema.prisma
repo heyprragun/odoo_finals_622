@@ -35,6 +35,14 @@ enum CustomerRequestStatus {
   CANCELLED
 }
 
+// NONE: no discount shortfall, or a prior one has been resolved. PENDING:
+// the Sales Rep's offered discount is below what the customer asked for,
+// and submission is blocked until the customer resolves it.
+enum DiscountReviewStatus {
+  NONE
+  PENDING
+}
+
 // SUBMITTED is kept for schema/history stability but is no longer a resting
 // state for new quotes - submitQuote() evaluates risk immediately and routes
 // straight to one of the outcomes below.
@@ -81,6 +89,17 @@ enum QuoteAuditAction {
   // REJECTED status transition so it surfaces via the existing Negotiations
   // tab exactly like an approver's rejection would.
   STOCK_UNAVAILABLE
+  // Manager/Admin-initiated from the Deal Health page, on an already-
+  // APPROVED quote only - distinct from REJECTED (which is only reachable
+  // pre-approval) and from CUSTOMER_CANCELLED (customer-initiated, and only
+  // reachable pre-approval too). Unwinds a confirmed order: the quote moves
+  // to CANCELLED, its Subscriptions (see subscription.service.ts) and
+  // unpaid Invoices are cancelled alongside it.
+  MANAGER_CANCELLED
+  // Manager/Admin-initiated from the Deal Health page - a reminder to the
+  // owning Sales Rep to update this deal. Advisory only: never changes the
+  // quote's status, so it doesn't affect the approval workflow at all.
+  NUDGED
 }
 
 enum BillingCycle {
@@ -106,6 +125,11 @@ enum SubscriptionEventType {
 enum InvoiceStatus {
   UNPAID
   PAID
+  // Set when the confirmed order it bills for is cancelled by Manager/Admin
+  // from the Deal Health page (see QuoteAuditAction.MANAGER_CANCELLED) - only
+  // ever applied to a still-UNPAID invoice; one already PAID is left alone
+  // (money already collected, no refund flow exists).
+  CANCELLED
 }
 
 enum RecommendationType {
@@ -135,9 +159,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  customer     Customer?         @relation(fields: [customerId], references: [id])
-  quotes       Quote[]           @relation("SalesRepQuotes")
-  auditEntries QuoteAuditEntry[]
+  customer                Customer?                   @relation(fields: [customerId], references: [id])
+  quotes                  Quote[]                     @relation("SalesRepQuotes")
+  auditEntries            QuoteAuditEntry[]
+  decidedTierChanges      CustomerTierChangeRequest[]
+  resolvedStockConflicts  StockPriorityConflict[]
+  orderComments           OrderComment[]
+  grievanceMessages       GrievanceMessage[]
 
   @@map("users")
 }
@@ -154,11 +182,12 @@ model Product {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  requestItems    CustomerRequestItem[]
-  quoteItems      QuoteItem[]
-  inventory       Inventory[]
-  subscriptions   Subscription[]
-  recommendations QuoteRecommendation[]
+  requestItems           CustomerRequestItem[]
+  quoteItems             QuoteItem[]
+  inventory              Inventory[]
+  subscriptions          Subscription[]
+  recommendations        QuoteRecommendation[]
+  stockPriorityConflicts StockPriorityConflict[]
 
   @@map("products")
 }
@@ -210,11 +239,13 @@ model Customer {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  users            User[]
-  customerRequests CustomerRequest[]
-  quotes           Quote[]
-  subscriptions    Subscription[]
-  invoices         Invoice[]
+  users              User[]
+  customerRequests   CustomerRequest[]
+  quotes             Quote[]
+  subscriptions      Subscription[]
+  invoices           Invoice[]
+  tierChangeRequests CustomerTierChangeRequest[]
+  grievances         Grievance[]
 
   @@map("customers")
 }
@@ -227,7 +258,9 @@ model Warehouse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  inventory Inventory[]
+  inventory              Inventory[]
+  allocations            QuoteItemAllocation[]
+  stockPriorityConflicts StockPriorityConflict[]
 
   @@map("warehouses")
 }
@@ -253,9 +286,44 @@ model CustomerRequest {
   status     CustomerRequestStatus @default(NEW)
   notes      String?
   // Customer's own discount ask when they raise this request (via the
-  // portal's "Create New Request" form, or a negotiation re-opening it) -
-  // purely informational context for the Sales Rep, never auto-applied.
+  // portal's "Create New Request" form, a negotiation re-opening it, or
+  // resolving a discount review below) - shown to the Sales Rep as context,
+  // and enforced at submit time (see quote.service.ts's submitQuote): a
+  // quote can't go to Manager/Finance approval offering less than this
+  // until the customer signs off via discountReviewStatus below.
   expectedDiscountPercentage Decimal? @db.Decimal(5, 2)
+  // Set when a Sales Rep tries to submit a quote offering less than
+  // expectedDiscountPercentage - proposedDiscountPercentage is what they
+  // actually offered, and PENDING blocks submission until the customer
+  // resolves it (accepts the lower offer, or counters with a new
+  // expectedDiscountPercentage) via the portal's Negotiations tab.
+  proposedDiscountPercentage Decimal?             @db.Decimal(5, 2)
+  discountReviewStatus       DiscountReviewStatus @default(NONE)
+  // Set via the portal's "Recurring Plans" tab - the customer wants this
+  // request billed on a recurring cycle rather than as a one-time order.
+  // Carried onto the Quote created from this request (see Quote below) so
+  // the same flag/cycle is what drives Subscription creation at approval
+  // time, regardless of the underlying products' own category.
+  isRecurring  Boolean       @default(false)
+  billingCycle BillingCycle?
+  // Set via the customer portal's "Change Subscription Plan" action on an
+  // existing Subscription - the item/quantity is forced to match that
+  // subscription exactly (see customerPortal.service.ts's createMyRequest),
+  // only the billing cycle differs. Goes through the exact same Create
+  // Request -> Quote -> Manager/Finance/Admin approval pipeline as any other
+  // order; once that quote reaches APPROVED, this Subscription is cancelled
+  // and replaced by the newly-created one (see subscription.service.ts's
+  // createSubscriptionsForApprovedQuote). Null for every ordinary request.
+  modifiesSubscriptionId String?
+  modifiesSubscription   Subscription? @relation(fields: [modifiesSubscriptionId], references: [id])
+  // Where the customer wants this order shipped - captured at request
+  // creation (one-time or recurring) and copied onto the Quote created from
+  // this request (see quote.service.ts's createQuote) so
+  // inventory.service.ts's suggestStockAllocation can ask Groq to estimate
+  // per-warehouse shipping cost to this destination and split stock to
+  // minimize it, instead of just picking whichever warehouse has the most
+  // stock on hand.
+  shippingLocation String?
   createdAt  DateTime              @default(now())
   updatedAt  DateTime              @updatedAt
 
@@ -304,19 +372,100 @@ model Quote {
   taxAmount          Decimal     @default(0) @db.Decimal(12, 2)
   totalAmount        Decimal     @default(0) @db.Decimal(12, 2)
   notes              String?
+  // Copied from the originating CustomerRequest at creation time (see
+  // quote.service.ts's createQuote) - drives Subscription creation at
+  // approval time for every line on this quote, not just SUBSCRIPTION-
+  // category products.
+  isRecurring        Boolean       @default(false)
+  billingCycle       BillingCycle?
+  // Copied from the originating CustomerRequest at creation time, same as
+  // isRecurring/billingCycle above - null for a quote started manually with
+  // no request behind it. Drives the Groq-assisted cost-optimized warehouse
+  // split in inventory.service.ts's suggestStockAllocation.
+  shippingLocation   String?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  customer        Customer          @relation(fields: [customerId], references: [id])
-  salesRep        User              @relation("SalesRepQuotes", fields: [salesRepId], references: [id])
-  customerRequest CustomerRequest?  @relation(fields: [customerRequestId], references: [id])
-  items           QuoteItem[]
-  auditEntries    QuoteAuditEntry[]
-  subscriptions   Subscription[]
-  invoices        Invoice[]
-  recommendations QuoteRecommendation[]
+  customer               Customer          @relation(fields: [customerId], references: [id])
+  salesRep               User              @relation("SalesRepQuotes", fields: [salesRepId], references: [id])
+  customerRequest        CustomerRequest?  @relation(fields: [customerRequestId], references: [id])
+  items                  QuoteItem[]
+  auditEntries           QuoteAuditEntry[]
+  subscriptions          Subscription[]
+  invoices               Invoice[]
+  recommendations        QuoteRecommendation[]
+  // As the BLOCKING side only - see StockPriorityConflict above.
+  stockPriorityConflicts StockPriorityConflict[]
+  comments               OrderComment[]
+  grievance              Grievance?
 
   @@map("quotes")
+}
+
+// Free-text discussion thread scoped to one order (Quote) - unlike
+// QuoteAuditEntry (one row per approval-workflow action: submit/approve/
+// return/reject, always machine-generated alongside a status change), this
+// is purely human back-and-forth between whoever is involved with the
+// order, with no status/workflow effect of its own. One thread per quote,
+// shared by every internal role that can see that quote (see
+// orderComment.service.ts's ownership rule, identical to getQuoteForUser's).
+model OrderComment {
+  id        String   @id @default(uuid())
+  quoteId   String
+  userId    String
+  message   String
+  createdAt DateTime @default(now())
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@map("order_comments")
+}
+
+enum GrievanceStatus {
+  OPEN
+  RESOLVED
+}
+
+// A delivery complaint the customer raises against one of their own
+// APPROVED orders (the customer portal's own terminal "delivered" status -
+// see customerPortal.service.ts's deriveOrderStatus) - at most one per quote
+// (@unique), matching "click an order, raise a grievance" as a one-time flow
+// per order. Visible internally to Manager/Admin only, never Sales Rep or
+// Finance. Resolution is deliberately the customer's own call, not staff's -
+// there is no staff-side "resolve" action anywhere in this feature, only
+// grievance.service.ts's resolveGrievance, callable only by the customer who
+// raised it.
+model Grievance {
+  id          String          @id @default(uuid())
+  quoteId     String          @unique
+  customerId  String
+  description String
+  status      GrievanceStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  resolvedAt  DateTime?
+
+  quote    Quote              @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  messages GrievanceMessage[]
+
+  @@map("grievances")
+}
+
+// The forum-style back-and-forth on one grievance, after its initial
+// description - postable by the customer who raised it, or any Manager/
+// Admin, same shape (sender name + role) as OrderComment's messages.
+model GrievanceMessage {
+  id          String   @id @default(uuid())
+  grievanceId String
+  userId      String
+  message     String
+  createdAt   DateTime @default(now())
+
+  grievance Grievance @relation(fields: [grievanceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@map("grievance_messages")
 }
 
 // AI-generated upsell/cross-sell suggestions for a quote, grounded in the
@@ -367,10 +516,35 @@ model QuoteItem {
   unitPrice Decimal @db.Decimal(12, 2)
   lineTotal Decimal @db.Decimal(12, 2)
 
-  quote   Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  quote       Quote                 @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product     Product               @relation(fields: [productId], references: [id])
+  allocations QuoteItemAllocation[]
 
   @@map("quote_items")
+}
+
+// Which warehouse(s) supply a line item's quantity, and how much from each -
+// the Sales Rep's own choice if they customized it, or the greedy
+// most-stocked-first suggestion otherwise. Creating/saving these is what
+// actually reserves the stock (Inventory.quantityAvailable/quantityReserved
+// move together) - see inventory.service.ts's reserve/release helpers.
+model QuoteItemAllocation {
+  id          String   @id @default(uuid())
+  quoteItemId String
+  warehouseId String
+  quantity    Int
+  // Provision for a later phase: once customer/warehouse geolocation is
+  // wired up, an AI call will estimate this line's shipping cost. Always
+  // null today - no cost model exists yet.
+  estimatedShippingCost Decimal? @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  quoteItem QuoteItem @relation(fields: [quoteItemId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+
+  @@unique([quoteItemId, warehouseId])
+  @@map("quote_item_allocations")
 }
 
 // Auto-created (one per subscription-category line item) the moment a
@@ -395,8 +569,46 @@ model Subscription {
   quote    Quote?              @relation(fields: [quoteId], references: [id])
   events   SubscriptionEvent[]
   invoices Invoice[]
+  // Every CustomerRequest that asked to change THIS subscription's plan -
+  // see CustomerRequest.modifiesSubscriptionId above. Almost always at most
+  // one at a time (a new one is blocked while an unresolved one exists).
+  planChangeRequests CustomerRequest[]
 
   @@map("subscriptions")
+}
+
+enum CustomerTierChangeType {
+  UPGRADE
+  DOWNGRADE
+}
+
+enum CustomerTierChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Customer-initiated (portal's "Upgrade Subscription" tab) request to change
+// the COMPANY's overall plan tier (Gold/Silver/Bronze) - this drives the
+// discount-governance tier limits, not any single product's Subscription
+// row. Never applied automatically - Admin reviews and decides; approving
+// writes the new tier straight onto Customer.tier.
+model CustomerTierChangeRequest {
+  id              String                   @id @default(uuid())
+  customerId      String
+  requestedTier   CustomerTier
+  type            CustomerTierChangeType
+  status          CustomerTierChangeStatus @default(PENDING)
+  customerNote    String?
+  adminNote       String?
+  createdAt       DateTime                 @default(now())
+  decidedAt       DateTime?
+  decidedByUserId String?
+
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  decidedBy User?    @relation(fields: [decidedByUserId], references: [id])
+
+  @@map("customer_tier_change_requests")
 }
 
 // Recurring-order / proration history. Every lifecycle action (creation,
@@ -422,6 +634,53 @@ model SubscriptionEvent {
 // recurring invoice per subscription-category line item (its first billing
 // cycle). Not user-created directly. subscriptionId is null for a one-time
 // invoice; quoteId is the quote that produced it either way.
+enum StockPriorityConflictStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+// Logged whenever a Sales Rep's attempt to reserve warehouse stock fails
+// because a LOWER-priority order (worse customer tier, or same tier with
+// lower margin - see stockPriority.service.ts) is currently holding the
+// exact stock this higher-priority order needed. Reallocation is never
+// automatic: a Manager/Admin must explicitly Release (frees the blocking
+// quote's stock, kicks it back to REVISION_REQUIRED so its Sales Rep notices
+// and re-picks a warehouse) or Dismiss (leaves the blocking quote untouched)
+// each one - see stockConflict.service.ts.
+model StockPriorityConflict {
+  id          String @id @default(uuid())
+  productId   String
+  warehouseId String
+  // How many units the higher-priority order needed that it couldn't get.
+  quantityNeeded Int
+  // The requester never has a persisted Quote at the moment this is raised -
+  // a brand-new quote being created is still mid-transaction and about to
+  // roll back (that's exactly why reservation failed), so there may be no
+  // Quote row at all. Captured as plain descriptive fields instead of a
+  // relation for this side only.
+  requestingCustomerName     String
+  requestingTier             CustomerTier
+  requestingMarginPercentage Decimal?     @db.Decimal(5, 2)
+  blockingQuoteId            String
+  // How much of the blocking quote's own reservation at this warehouse is
+  // implicated - may be less than its full allocation there.
+  blockingQuantity         Int
+  blockingTier             CustomerTier
+  blockingMarginPercentage Decimal?      @db.Decimal(5, 2)
+  status                  StockPriorityConflictStatus @default(PENDING)
+  resolvedByUserId         String?
+  createdAt                DateTime                    @default(now())
+  resolvedAt               DateTime?
+
+  product       Product   @relation(fields: [productId], references: [id])
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  blockingQuote Quote     @relation(fields: [blockingQuoteId], references: [id], onDelete: Cascade)
+  resolvedBy    User?     @relation(fields: [resolvedByUserId], references: [id])
+
+  @@map("stock_priority_conflicts")
+}
+
 model Invoice {
   id             String        @id @default(uuid())
   invoiceNumber  String        @unique

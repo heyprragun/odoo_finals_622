@@ -14,7 +14,10 @@ const RECOMMENDATION_INCLUDE = {
 
 type RecommendationRow = Prisma.QuoteRecommendationGetPayload<{ include: typeof RECOMMENDATION_INCLUDE }>;
 
-function formatRecommendation(row: RecommendationRow) {
+// Only ADMIN sees product cost/margin data, matching sanitizeProduct.ts's
+// exact rule - a Sales Rep viewing their own quote's recommendations still
+// never sees cost, only price/revenue (which need no cost to compute).
+function formatRecommendation(row: RecommendationRow, viewerRole: Role) {
   return {
     id: row.id,
     type: row.type,
@@ -26,6 +29,7 @@ function formatRecommendation(row: RecommendationRow) {
       sku: row.product.sku,
       category: row.product.category,
       unitPrice: Number(row.product.unitPrice),
+      ...(viewerRole === Role.ADMIN ? { cost: Number(row.product.cost) } : {}),
     },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -56,7 +60,7 @@ export async function listRecommendations(quoteId: string, user: AuthenticatedUs
     include: RECOMMENDATION_INCLUDE,
     orderBy: [{ type: "asc" }, { createdAt: "asc" }],
   });
-  return rows.map(formatRecommendation);
+  return rows.map((row) => formatRecommendation(row, user.role));
 }
 
 /**

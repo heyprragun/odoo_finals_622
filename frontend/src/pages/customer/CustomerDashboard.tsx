@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { listMyOrders } from "../../api/customerPortal";
+import { useSortableTable } from "../../hooks/useSortableTable";
+import { SortableHeader } from "../../components/SortableHeader";
 import type { CustomerOrder, CustomerOrderStatus } from "../../types/sales";
 import "../sales/sales.css";
 
@@ -15,6 +17,21 @@ const STATUS_LABELS: Record<CustomerOrderStatus, string> = {
   CANCELLED: "Cancelled",
 };
 
+function getSortValue(order: CustomerOrder, key: string): string | number | null {
+  switch (key) {
+    case "date":
+      return new Date(order.createdAt).getTime();
+    case "discount":
+      return order.expectedDiscountPercentage;
+    case "quote":
+      return order.quote?.quoteNumber ?? "";
+    case "status":
+      return order.status;
+    default:
+      return null;
+  }
+}
+
 // "Sent orders" here are the customer's own CustomerRequests. Status is
 // collapsed to three values - APPROVED only once the linked quote has
 // cleared every approval stage including Admin's, CANCELLED once the
@@ -25,6 +42,8 @@ export function CustomerDashboard() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<CustomerOrder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const { sorted, sortKey, sortDirection, toggleSort } = useSortableTable(orders ?? [], getSortValue, "date", "desc");
 
   useEffect(() => {
     listMyOrders()
@@ -64,16 +83,16 @@ export function CustomerDashboard() {
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Date</th>
+                <SortableHeader label="Date" sortKey="date" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                 <th>Products</th>
-                <th>Expected Discount</th>
-                <th>Quote</th>
-                <th>Status</th>
+                <SortableHeader label="Expected Discount" sortKey="discount" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                <SortableHeader label="Quote" sortKey="quote" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                <SortableHeader label="Status" sortKey="status" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                 <th>Updates</th>
               </tr>
             </thead>
             <tbody>
-              {orders.map((order) => (
+              {sorted.map((order) => (
                 <tr
                   key={order.id}
                   className="clickable-row"

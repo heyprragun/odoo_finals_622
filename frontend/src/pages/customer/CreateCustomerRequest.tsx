@@ -27,6 +27,7 @@ export function CreateCustomerRequest() {
   const [selectedProductId, setSelectedProductId] = useState("");
   const [lines, setLines] = useState<RequestLine[]>([]);
   const [expectedDiscountPercentage, setExpectedDiscountPercentage] = useState("");
+  const [shippingLocation, setShippingLocation] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -70,16 +71,22 @@ export function CreateCustomerRequest() {
       setError("Add at least one product before submitting.");
       return;
     }
+    if (!shippingLocation.trim()) {
+      setError("Enter where this order should ship before submitting.");
+      return;
+    }
     setIsSubmitting(true);
     try {
       await createMyRequest({
         items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
         expectedDiscountPercentage: expectedDiscountPercentage ? Number(expectedDiscountPercentage) : undefined,
+        shippingLocation: shippingLocation.trim(),
         notes: notes.trim() || undefined,
       });
       setSuccessMessage("Your request has been sent to our sales team.");
       setLines([]);
       setExpectedDiscountPercentage("");
+      setShippingLocation("");
       setNotes("");
       setTimeout(() => navigate("/dashboard"), 1200);
     } catch (err) {
@@ -156,6 +163,23 @@ export function CreateCustomerRequest() {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="sales-card">
+        <h2>Shipping Location</h2>
+        <div className="product-search-row">
+          <input
+            type="text"
+            placeholder="e.g. Bangalore, Karnataka"
+            value={shippingLocation}
+            onChange={(e) => setShippingLocation(e.target.value)}
+            style={{ flex: 1, minWidth: 240 }}
+          />
+        </div>
+        <p className="explainer-text" style={{ margin: 0 }}>
+          Where should this order be shipped? We use this to pick the warehouse(s) that ship it to you
+          fastest and cheapest.
+        </p>
       </div>
 
       <div className="sales-card">

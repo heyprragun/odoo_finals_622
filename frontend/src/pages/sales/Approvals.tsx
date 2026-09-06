@@ -3,8 +3,71 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
 import { listApprovals } from "../../api/approvals";
+import { useSortableTable } from "../../hooks/useSortableTable";
+import { SortableHeader } from "../../components/SortableHeader";
 import type { ApprovalListItem, ApprovalSummary } from "../../types/sales";
 import "./sales.css";
+
+function getSortValue(item: ApprovalListItem, key: string): string | number | null {
+  switch (key) {
+    case "quoteNumber":
+      return item.quoteNumber;
+    case "customer":
+      return item.customer.name;
+    case "risk":
+      return item.riskLevel ?? "";
+    case "stage":
+      return item.stageLabel;
+    case "assignedTo":
+      return item.assignedTo ?? "";
+    default:
+      return null;
+  }
+}
+
+function ApprovalsTable({
+  items,
+  emptyMessage,
+  onRowClick,
+}: {
+  items: ApprovalListItem[];
+  emptyMessage: string;
+  onRowClick: (id: string) => void;
+}) {
+  const { sorted, sortKey, sortDirection, toggleSort } = useSortableTable(items, getSortValue, "customer");
+
+  if (items.length === 0) {
+    return <p className="sales-empty">{emptyMessage}</p>;
+  }
+  return (
+    <table className="sales-table">
+      <thead>
+        <tr>
+          <SortableHeader label="Quotation" sortKey="quoteNumber" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+          <SortableHeader label="Customer" sortKey="customer" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+          <SortableHeader label="Blended Risk" sortKey="risk" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+          <SortableHeader label="Stage" sortKey="stage" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+          <SortableHeader label="Assigned To" sortKey="assignedTo" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((item) => (
+          <tr key={item.id} className="clickable-row" onClick={() => onRowClick(item.id)}>
+            <td>{item.quoteNumber}</td>
+            <td>
+              {item.customer.name} <span className="tier-badge">{item.customer.tier}</span>
+            </td>
+            <td>
+              {item.riskLevel && <span className={`risk-badge risk-${item.riskLevel}`}>{item.riskLevel}</span>}
+            </td>
+            <td>{item.stageLabel}</td>
+            <td>{item.assignedTo ?? "—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 export function Approvals() {
   const navigate = useNavigate();
@@ -40,42 +103,8 @@ export function Approvals() {
       });
   }, [effectivePendingOnly]);
 
-  function renderTable(list: ApprovalListItem[], emptyMessage: string) {
-    if (list.length === 0) {
-      return <p className="sales-empty">{emptyMessage}</p>;
-    }
-    return (
-      <table className="sales-table">
-        <thead>
-          <tr>
-            <th>Quotation</th>
-            <th>Customer</th>
-            <th>Blended Risk</th>
-            <th>Stage</th>
-            <th>Assigned To</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((item) => (
-            <tr
-              key={item.id}
-              className="clickable-row"
-              onClick={() => navigate(`/sales/approvals/${item.id}`)}
-            >
-              <td>{item.quoteNumber}</td>
-              <td>
-                {item.customer.name} <span className="tier-badge">{item.customer.tier}</span>
-              </td>
-              <td>
-                {item.riskLevel && <span className={`risk-badge risk-${item.riskLevel}`}>{item.riskLevel}</span>}
-              </td>
-              <td>{item.stageLabel}</td>
-              <td>{item.assignedTo ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
+  function goToDetail(id: string) {
+    navigate(`/sales/approvals/${id}`);
   }
 
   return (
@@ -116,17 +145,19 @@ export function Approvals() {
         <>
           <div className="sales-card">
             <h2>Requires Your Approval</h2>
-            {renderTable(
-              items.filter((i) => i.status === "PENDING_MANAGER_APPROVAL"),
-              "Nothing is waiting on you right now."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.status === "PENDING_MANAGER_APPROVAL")}
+              emptyMessage="Nothing is waiting on you right now."
+              onRowClick={goToDetail}
+            />
           </div>
           <div className="sales-card">
             <h2>Other Quotations</h2>
-            {renderTable(
-              items.filter((i) => i.status !== "PENDING_MANAGER_APPROVAL"),
-              "No other quotations yet."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.status !== "PENDING_MANAGER_APPROVAL")}
+              emptyMessage="No other quotations yet."
+              onRowClick={goToDetail}
+            />
           </div>
         </>
       )}
@@ -138,17 +169,19 @@ export function Approvals() {
               kept explicit here too as a belt-and-braces display rule. */}
           <div className="sales-card">
             <h2>Requires Your Approval</h2>
-            {renderTable(
-              items.filter((i) => i.riskLevel === "HIGH" && i.status === "PENDING_FINANCE_APPROVAL"),
-              "Nothing is waiting on you right now."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.riskLevel === "HIGH" && i.status === "PENDING_FINANCE_APPROVAL")}
+              emptyMessage="Nothing is waiting on you right now."
+              onRowClick={goToDetail}
+            />
           </div>
           <div className="sales-card">
             <h2>Other Quotations</h2>
-            {renderTable(
-              items.filter((i) => i.riskLevel === "HIGH" && i.status !== "PENDING_FINANCE_APPROVAL"),
-              "No other high-risk quotations yet."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.riskLevel === "HIGH" && i.status !== "PENDING_FINANCE_APPROVAL")}
+              emptyMessage="No other high-risk quotations yet."
+              onRowClick={goToDetail}
+            />
           </div>
         </>
       )}
@@ -159,17 +192,19 @@ export function Approvals() {
               risk level, so unlike Finance this isn't filtered by risk. */}
           <div className="sales-card">
             <h2>Requires Your Approval</h2>
-            {renderTable(
-              items.filter((i) => i.status === "PENDING_ADMIN_APPROVAL"),
-              "Nothing is waiting on you right now."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.status === "PENDING_ADMIN_APPROVAL")}
+              emptyMessage="Nothing is waiting on you right now."
+              onRowClick={goToDetail}
+            />
           </div>
           <div className="sales-card">
             <h2>Other Quotations</h2>
-            {renderTable(
-              items.filter((i) => i.status !== "PENDING_ADMIN_APPROVAL"),
-              "No other quotations yet."
-            )}
+            <ApprovalsTable
+              items={items.filter((i) => i.status !== "PENDING_ADMIN_APPROVAL")}
+              emptyMessage="No other quotations yet."
+              onRowClick={goToDetail}
+            />
           </div>
         </>
       )}
@@ -186,7 +221,9 @@ export function Approvals() {
               Pending Only
             </label>
           </div>
-          <div className="sales-card">{renderTable(items, "No quotations found.")}</div>
+          <div className="sales-card">
+            <ApprovalsTable items={items} emptyMessage="No quotations found." onRowClick={goToDetail} />
+          </div>
         </>
       )}
     </div>

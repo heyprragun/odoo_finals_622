@@ -2,12 +2,33 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { searchProducts } from "../../api/products";
+import { useSortableTable } from "../../hooks/useSortableTable";
+import { SortableHeader } from "../../components/SortableHeader";
 import type { Product } from "../../types/sales";
 import { NoAccessBlock } from "./NoAccessBlock";
 import "./sales.css";
 
 function formatCurrency(amount: number) {
   return `₹${amount.toLocaleString("en-IN")}`;
+}
+
+function getSortValue(product: Product, key: string): string | number | null {
+  switch (key) {
+    case "name":
+      return product.name;
+    case "sku":
+      return product.sku;
+    case "category":
+      return product.category;
+    case "price":
+      return product.unitPrice;
+    case "cost":
+      return product.cost ?? null;
+    case "status":
+      return product.active ? 1 : 0;
+    default:
+      return null;
+  }
 }
 
 export function Products() {
@@ -20,6 +41,8 @@ export function Products() {
   const [category, setCategory] = useState("");
   const [products, setProducts] = useState<Product[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const { sorted, sortKey, sortDirection, toggleSort } = useSortableTable(products ?? [], getSortValue, "name");
 
   useEffect(() => {
     if (isDenied) return;
@@ -76,17 +99,21 @@ export function Products() {
           <table className="sales-table">
             <thead>
               <tr>
-                <th>Product</th>
-                <th>SKU</th>
-                <th>Category</th>
-                <th>Selling Price</th>
-                {isAdmin && <th>Cost</th>}
-                {isAdmin && <th>Status</th>}
+                <SortableHeader label="Product" sortKey="name" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                <SortableHeader label="SKU" sortKey="sku" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                <SortableHeader label="Category" sortKey="category" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                <SortableHeader label="Selling Price" sortKey="price" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                {isAdmin && (
+                  <SortableHeader label="Cost" sortKey="cost" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                )}
+                {isAdmin && (
+                  <SortableHeader label="Status" sortKey="status" activeKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                )}
                 {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
+              {sorted.map((p) => (
                 <tr
                   key={p.id}
                   className={isAdmin ? "clickable-row" : undefined}

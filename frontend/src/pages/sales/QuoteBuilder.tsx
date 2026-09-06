@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { getQuote, markStockUnavailable, submitQuote, updateQuote } from "../../api/quotes";
+import { deleteQuote, getQuote, markStockUnavailable, submitQuote, updateQuote } from "../../api/quotes";
 import { searchProducts } from "../../api/products";
 import { getStockAllocation } from "../../api/inventory";
 import { RecommendationsPanel } from "./RecommendationsPanel";
-import type { Product, ProductCategory, Quote, StockAllocationResult } from "../../types/sales";
+import { QuoteAuditTrail } from "./QuoteAuditTrail";
+import { TeamDiscussion } from "./TeamDiscussion";
+import type {
+  Product,
+  ProductCategory,
+  Quote,
+  QuoteItemAllocationInput,
+  StockAllocationResult,
+} from "../../types/sales";
 import "./sales.css";
 
 interface BuilderItem {
+  // Present once this line has been saved to the server - undefined for a
+  // product the Rep just added locally and hasn't saved yet.
+  id?: string;
   productId: string;
   name: string;
   sku: string;
@@ -31,6 +42,7 @@ function errorMessage(err: unknown, fallback: string) {
 export function QuoteBuilder() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [items, setItems] = useState<BuilderItem[]>([]);
@@ -39,6 +51,7 @@ export function QuoteBuilder() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -46,10 +59,20 @@ export function QuoteBuilder() {
 
   const [discountPercentage, setDiscountPercentage] = useState(0);
   const [taxPercentage, setTaxPercentage] = useState(0);
+  const [shippingLocation, setShippingLocation] = useState("");
 
   // Keyed by `${productId}:${quantity}` so changing a line's quantity
-  // triggers a fresh allocation check rather than reusing a stale one.
+  // triggers a fresh allocation check rather than reusing a stale one. Once
+  // loaded, quantityAllocated per warehouse is directly editable in place -
+  // this state IS the Rep's current warehouse split, not just a suggestion.
   const [allocations, setAllocations] = useState<Record<string, StockAllocationResult | "loading" | "error">>({});
+  // The quote's already-saved per-item warehouse split, keyed the same way,
+  // captured once when the quote loads. Used to seed the editable state
+  // with what's actually reserved rather than a fresh auto-suggestion, but
+  // only for that exact original key - changing the quantity afterward
+  // intentionally resets to a fresh suggestion rather than trying to
+  // reconcile a stale saved split against a different quantity.
+  const savedAllocationsRef = useRef<Record<string, QuoteItemAllocationInput[]>>({});
   const [showStockIssueForm, setShowStockIssueForm] = useState(false);
   const [stockIssueNote, setStockIssueNote] = useState("Order not possible");
   const [isFlaggingStockIssue, setIsFlaggingStockIssue] = useState(false);
@@ -61,6 +84,12 @@ export function QuoteBuilder() {
   const isOwnQuote = !!quote && !!user && quote.salesRepId === user.id;
   const isEditable =
     isOwnQuote && (quote?.status === "DRAFT" || quote?.status === "REVISION_REQUIRED");
+  // A quote built from a customer request has its product/quantity
+  // composition fixed server-side (see quote.service.ts's updateQuote) -
+  // the customer already told us what they want, so there's no product
+  // search or per-line quantity/remove control to offer here. A quote
+  // started manually (NewQuote, no linked request) still needs all of it.
+  const isFromRequest = !!quote?.customerRequestId;
 
   useEffect(() => {
     if (!id) return;
@@ -69,6 +98,7 @@ export function QuoteBuilder() {
         setQuote(q);
         setItems(
           q.items.map((item) => ({
+            id: item.id,
             productId: item.productId,
             name: item.product.name,
             sku: item.product.sku,
@@ -79,27 +109,68 @@ export function QuoteBuilder() {
         );
         setDiscountPercentage(q.discountPercentage);
         setTaxPercentage(q.taxPercentage);
+        setShippingLocation(q.shippingLocation ?? "");
+        for (const item of q.items) {
+          if (item.allocations.length > 0) {
+            savedAllocationsRef.current[`${item.productId}:${item.quantity}`] = item.allocations.map((a) => ({
+              warehouseId: a.warehouseId,
+              quantity: a.quantity,
+            }));
+          }
+        }
       })
       .catch((err) => setLoadError(errorMessage(err, "Failed to load this quote.")));
   }, [id]);
 
-  const loadAllocation = useCallback((productId: string, quantity: number) => {
-    const key = `${productId}:${quantity}`;
-    setAllocations((prev) => ({ ...prev, [key]: "loading" }));
-    getStockAllocation(productId, quantity)
-      .then((data) => setAllocations((prev) => ({ ...prev, [key]: data })))
-      .catch(() => setAllocations((prev) => ({ ...prev, [key]: "error" })));
-  }, []);
+  const loadAllocation = useCallback(
+    (productId: string, quantity: number, quoteItemId: string | undefined) => {
+      const key = `${productId}:${quantity}`;
+      setAllocations((prev) => ({ ...prev, [key]: "loading" }));
+      getStockAllocation(productId, quantity, quoteItemId, quote?.shippingLocation ?? undefined)
+        .then((data) => {
+          const saved = savedAllocationsRef.current[key];
+          const merged = saved
+            ? {
+                ...data,
+                allocations: data.allocations.map((a) => {
+                  const savedQty = saved.find((s) => s.warehouseId === a.warehouseId)?.quantity;
+                  return savedQty !== undefined ? { ...a, quantityAllocated: savedQty } : a;
+                }),
+              }
+            : data;
+          setAllocations((prev) => ({ ...prev, [key]: merged }));
+        })
+        .catch(() => setAllocations((prev) => ({ ...prev, [key]: "error" })));
+    },
+    [quote?.shippingLocation]
+  );
 
   useEffect(() => {
     for (const item of items) {
       const key = `${item.productId}:${item.quantity}`;
       if (!(key in allocations)) {
-        loadAllocation(item.productId, item.quantity);
+        loadAllocation(item.productId, item.quantity, item.id);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
+
+  function updateAllocationQuantity(key: string, warehouseId: string, quantity: number) {
+    setAllocations((prev) => {
+      const current = prev[key];
+      if (!current || current === "loading" || current === "error") return prev;
+      const safeQty = Number.isFinite(quantity) && quantity >= 0 ? Math.floor(quantity) : 0;
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          allocations: current.allocations.map((a) =>
+            a.warehouseId === warehouseId ? { ...a, quantityAllocated: safeQty } : a
+          ),
+        },
+      };
+    });
+  }
 
   // Flags on-screen when the currently-entered quantity for any line
   // exceeds total available inventory - informational only, doesn't block
@@ -163,13 +234,25 @@ export function QuoteBuilder() {
     if (!id) throw new Error("Missing quote id");
     const updated = await updateQuote(id, {
       notes: quote?.notes ?? undefined,
-      items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+      items: items.map((i) => {
+        const alloc = allocations[`${i.productId}:${i.quantity}`];
+        const chosenAllocations =
+          alloc && alloc !== "loading" && alloc !== "error"
+            ? alloc.allocations
+                .filter((a) => a.quantityAllocated > 0)
+                .map((a) => ({ warehouseId: a.warehouseId, quantity: a.quantityAllocated }))
+            : undefined;
+        return { productId: i.productId, quantity: i.quantity, allocations: chosenAllocations };
+      }),
       discountPercentage,
       taxPercentage,
+      shippingLocation: isFromRequest ? undefined : shippingLocation.trim() || undefined,
     });
     setQuote(updated);
+    setShippingLocation(updated.shippingLocation ?? "");
     setItems(
       updated.items.map((item) => ({
+        id: item.id,
         productId: item.productId,
         name: item.product.name,
         sku: item.product.sku,
@@ -178,6 +261,16 @@ export function QuoteBuilder() {
         quantity: item.quantity,
       }))
     );
+    savedAllocationsRef.current = {};
+    for (const item of updated.items) {
+      if (item.allocations.length > 0) {
+        savedAllocationsRef.current[`${item.productId}:${item.quantity}`] = item.allocations.map((a) => ({
+          warehouseId: a.warehouseId,
+          quantity: a.quantity,
+        }));
+      }
+    }
+    setAllocations({});
     setDiscountPercentage(updated.discountPercentage);
     setTaxPercentage(updated.taxPercentage);
     return updated;
@@ -213,6 +306,20 @@ export function QuoteBuilder() {
     }
   }
 
+  async function handleDeleteDraft() {
+    if (!id) return;
+    if (!window.confirm("Delete this draft? This can't be undone.")) return;
+    setActionError(null);
+    setIsDeleting(true);
+    try {
+      await deleteQuote(id);
+      navigate("/sales/quotes", { replace: true });
+    } catch (err) {
+      setActionError(errorMessage(err, "Failed to delete this draft."));
+      setIsDeleting(false);
+    }
+  }
+
   async function handleSubmit() {
     if (!id) return;
     setActionError(null);
@@ -222,7 +329,18 @@ export function QuoteBuilder() {
       await persistItems();
       const submitted = await submitQuote(id);
       setQuote(submitted);
-      setSuccessMessage("Quote submitted.");
+      // A discount below what the customer expected blocks submission - the
+      // backend leaves the quote in its editable status and flags it for
+      // the customer instead (see customerRequestDiscountReview.status).
+      if (submitted.customerRequestDiscountReview?.status === "PENDING") {
+        setActionError(
+          `Not submitted - your ${submitted.discountPercentage}% discount is below the customer's expected ` +
+            `${submitted.customerRequestDiscountReview.expectedDiscountPercentage}%. This has been flagged for ` +
+            `the customer to resolve in their Negotiations tab before it can go to Manager/Finance approval.`
+        );
+      } else {
+        setSuccessMessage("Quote submitted.");
+      }
     } catch (err) {
       setActionError(errorMessage(err, "Failed to submit quote."));
     } finally {
@@ -261,6 +379,14 @@ export function QuoteBuilder() {
         </Link>
       </div>
 
+      {quote.pendingNudge && (
+        <div className="banner-error">
+          <strong>{quote.pendingNudge.fromUserName}</strong> flagged this deal on{" "}
+          {new Date(quote.pendingNudge.createdAt).toLocaleString()} and asked you to update it
+          {quote.pendingNudge.note ? `: "${quote.pendingNudge.note}"` : "."}
+        </div>
+      )}
+
       {actionError && <div className="banner-error">{actionError}</div>}
       {successMessage && <div className="banner-success">{successMessage}</div>}
 
@@ -270,7 +396,27 @@ export function QuoteBuilder() {
           <strong>{quote.customer.name}</strong>{" "}
           <span className="tier-badge">{quote.customer.tier}</span>
         </p>
+        {isFromRequest || !isEditable ? (
+          <p>
+            Ship To: <strong>{quote.shippingLocation ?? "Not specified"}</strong>
+          </p>
+        ) : (
+          <div className="product-search-row">
+            <span>Ship To:</span>
+            <input
+              type="text"
+              placeholder="e.g. Bangalore, Karnataka"
+              value={shippingLocation}
+              onChange={(e) => setShippingLocation(e.target.value)}
+              style={{ flex: 1, minWidth: 240 }}
+            />
+          </div>
+        )}
       </div>
+
+      <QuoteAuditTrail quoteId={quote.id} />
+
+      <TeamDiscussion quoteId={quote.id} />
 
       {isEditable && hasStockIssue && (
         <div className="sales-card">
@@ -321,7 +467,7 @@ export function QuoteBuilder() {
         </div>
       )}
 
-      {isEditable && (
+      {isEditable && !isFromRequest && (
         <div className="sales-card">
           <h2>Product Search</h2>
           <div className="product-search-row">
@@ -384,7 +530,7 @@ export function QuoteBuilder() {
                 <th>Unit Price</th>
                 <th>Quantity</th>
                 <th>Line Total</th>
-                {isEditable && <th></th>}
+                {isEditable && !isFromRequest && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -394,7 +540,8 @@ export function QuoteBuilder() {
                     {item.name}
                     <div>
                       {(() => {
-                        const alloc = allocations[`${item.productId}:${item.quantity}`];
+                        const key = `${item.productId}:${item.quantity}`;
+                        const alloc = allocations[key];
                         if (alloc === "loading") {
                           return <span className="warehouse-line">Checking stock...</span>;
                         }
@@ -404,6 +551,7 @@ export function QuoteBuilder() {
                         if (alloc.totalAvailable === 0 && alloc.allocations.length === 0) {
                           return <span className="warehouse-line">No warehouse stock configured.</span>;
                         }
+                        const totalAllocated = alloc.allocations.reduce((sum, a) => sum + a.quantityAllocated, 0);
                         return (
                           <>
                             {!alloc.fulfillable && (
@@ -415,12 +563,47 @@ export function QuoteBuilder() {
                                 {alloc.requestedQuantity} (short by {alloc.shortfall}).
                               </div>
                             )}
-                            {alloc.allocations.map((a) => (
-                              <div className="warehouse-line" key={a.warehouseId}>
-                                {a.warehouseName} ({a.location}) — take {a.quantityAllocated} of{" "}
-                                {a.quantityAvailable} available
+                            {alloc.costOptimized && (
+                              <div className="warehouse-line" style={{ color: "var(--color-success)" }}>
+                                ✓ Cost-optimized split for {quote.shippingLocation}
                               </div>
-                            ))}
+                            )}
+                            {alloc.allocations.map((a) =>
+                              isEditable ? (
+                                <div className="warehouse-line" key={a.warehouseId}>
+                                  {a.warehouseName} ({a.location})
+                                  {a.estimatedCostPerUnit !== null && ` — ~${formatCurrency(a.estimatedCostPerUnit)}/unit shipping`}{" "}
+                                  —{" "}
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={a.quantityAvailable}
+                                    value={a.quantityAllocated}
+                                    onChange={(e) =>
+                                      updateAllocationQuantity(key, a.warehouseId, Number(e.target.value))
+                                    }
+                                    style={{ width: 56 }}
+                                  />{" "}
+                                  of {a.quantityAvailable} available
+                                </div>
+                              ) : (
+                                a.quantityAllocated > 0 && (
+                                  <div className="warehouse-line" key={a.warehouseId}>
+                                    {a.warehouseName} ({a.location}) — {a.quantityAllocated} allocated
+                                    {a.estimatedShippingCost !== null &&
+                                      ` (~${formatCurrency(a.estimatedShippingCost)} shipping)`}
+                                  </div>
+                                )
+                              )
+                            )}
+                            {isEditable && (
+                              <div
+                                className="warehouse-line"
+                                style={{ color: totalAllocated === item.quantity ? "#1b8a4a" : "#b3720a" }}
+                              >
+                                {totalAllocated} of {item.quantity} allocated
+                              </div>
+                            )}
                           </>
                         );
                       })()}
@@ -429,7 +612,7 @@ export function QuoteBuilder() {
                   <td>{item.sku}</td>
                   <td>{formatCurrency(item.unitPrice)}</td>
                   <td>
-                    {isEditable ? (
+                    {isEditable && !isFromRequest ? (
                       <div className="qty-control">
                         <button onClick={() => updateQuantity(item.productId, item.quantity - 1)}>−</button>
                         <input
@@ -445,7 +628,7 @@ export function QuoteBuilder() {
                     )}
                   </td>
                   <td>{formatCurrency(item.unitPrice * item.quantity)}</td>
-                  {isEditable && (
+                  {isEditable && !isFromRequest && (
                     <td>
                       <button className="sales-btn sales-btn-danger" onClick={() => removeItem(item.productId)}>
                         Remove
@@ -458,6 +641,25 @@ export function QuoteBuilder() {
           </table>
         )}
       </div>
+
+      {quote.customerRequestDiscountReview && (
+        <div className="sales-card">
+          <h2>Customer's Discount Expectation</h2>
+          <p>
+            The customer expects a discount of{" "}
+            <strong>{quote.customerRequestDiscountReview.expectedDiscountPercentage}%</strong>. Offering less
+            and submitting will flag it for the customer to resolve before it can go to approval.
+          </p>
+          {quote.customerRequestDiscountReview.status === "PENDING" && (
+            <div className="banner-error">
+              Awaiting customer response - you offered{" "}
+              {quote.customerRequestDiscountReview.proposedDiscountPercentage}%, below their expected{" "}
+              {quote.customerRequestDiscountReview.expectedDiscountPercentage}%. You can't resubmit until they
+              resolve this in their Negotiations tab (or you raise your discount to meet their ask).
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sales-card">
         <h2>Quote Summary</h2>
@@ -529,6 +731,7 @@ export function QuoteBuilder() {
           quoteId={quote.id}
           hasItems={items.length > 0}
           onBeforeGenerate={isEditable ? persistItems : undefined}
+          quote={quote}
         />
       )}
 
@@ -544,6 +747,15 @@ export function QuoteBuilder() {
           >
             {isSubmitting ? "Submitting..." : "Submit Quote"}
           </button>
+          {quote.status === "DRAFT" && (
+            <button
+              className="sales-btn sales-btn-danger"
+              onClick={handleDeleteDraft}
+              disabled={isSaving || isSubmitting || isDeleting}
+            >
+              {isDeleting ? "Deleting..." : "Delete Draft"}
+            </button>
+          )}
         </div>
       )}
     </div>

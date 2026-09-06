@@ -11,6 +11,7 @@ import {
   updateQuote,
   submitQuote,
   markStockUnavailable,
+  deleteQuote,
 } from "../controllers/quote.controller";
 
 const router = Router();
@@ -31,5 +32,6 @@ router.post(
   validateBody(markStockUnavailableSchema),
   markStockUnavailable
 );
+router.delete("/:id", authorizeRoles(Role.SALES_REP), deleteQuote);
 
 export default router;

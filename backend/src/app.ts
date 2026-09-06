@@ -15,6 +15,13 @@ import warehouseRoutes from "./routes/warehouse.routes";
 import governanceRoutes from "./routes/governance.routes";
 import customerPortalRoutes from "./routes/customerPortal.routes";
 import recommendationRoutes from "./routes/recommendation.routes";
+import reportsRoutes from "./routes/reports.routes";
+import customerTierChangeRoutes from "./routes/customerTierChange.routes";
+import dealHealthRoutes from "./routes/dealHealth.routes";
+import navAlertsRoutes from "./routes/navAlerts.routes";
+import stockConflictRoutes from "./routes/stockConflict.routes";
+import orderCommentRoutes from "./routes/orderComment.routes";
+import grievanceRoutes from "./routes/grievance.routes";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -34,6 +41,7 @@ export function createApp() {
   app.use("/api/customer-requests", customerRequestRoutes);
   app.use("/api/inventory", inventoryRoutes);
   app.use("/api/quotes/:quoteId/recommendations", recommendationRoutes);
+  app.use("/api/quotes/:quoteId/comments", orderCommentRoutes);
   app.use("/api/quotes", quoteRoutes);
   app.use("/api/approvals", approvalRoutes);
   app.use("/api/subscriptions", subscriptionRoutes);
@@ -41,6 +49,12 @@ export function createApp() {
   app.use("/api/warehouses", warehouseRoutes);
   app.use("/api/governance-settings", governanceRoutes);
   app.use("/api/portal", customerPortalRoutes);
+  app.use("/api/reports", reportsRoutes);
+  app.use("/api/customer-tier-change-requests", customerTierChangeRoutes);
+  app.use("/api/deal-health", dealHealthRoutes);
+  app.use("/api/nav-alerts", navAlertsRoutes);
+  app.use("/api/stock-conflicts", stockConflictRoutes);
+  app.use("/api/grievances", grievanceRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -1,7 +1,21 @@
-import { CustomerRequestStatus, Prisma, QuoteAuditAction, QuoteStatus, Role } from "@prisma/client";
+import {
+  BillingCycle,
+  CustomerRequestStatus,
+  DiscountReviewStatus,
+  Prisma,
+  QuoteAuditAction,
+  QuoteStatus,
+  Role,
+} from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
 import { assessDiscountRisk, getDiscountGovernanceContext } from "./discountGovernance.service";
+import {
+  releaseAllocationsForItems,
+  releaseAllocationsForQuote,
+  reserveAllocationsForItem,
+} from "./inventory.service";
+import { computeMarginPercent, type PriorityRequesterContext } from "./stockPriority.service";
 import type { CreateQuoteInput, QuoteItemInput, UpdateQuoteInput } from "../validation/quote.validation";
 
 // A quote is editable/re-submittable by its Sales Rep only while it's a
@@ -15,13 +29,61 @@ interface AuthenticatedUser {
 
 const QUOTE_INCLUDE = {
   customer: true,
-  items: { include: { product: true } },
+  items: { include: { product: true, allocations: { include: { warehouse: true } } } },
+  // Lets the Sales Rep see what the customer actually expects, and whether
+  // their own last submit attempt got flagged for falling short of it (see
+  // submitQuote's discount-expectation gate below).
+  customerRequest: {
+    select: {
+      expectedDiscountPercentage: true,
+      proposedDiscountPercentage: true,
+      discountReviewStatus: true,
+    },
+  },
+  // Most recent Deal-Health "Nudge Sales Rep" reminder, if any -
+  // sanitizeQuote.ts decides whether it's still "unread" (newer than this
+  // quote's own updatedAt) before surfacing it.
+  auditEntries: {
+    where: { action: QuoteAuditAction.NUDGED },
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    include: { user: true },
+  },
 } satisfies Prisma.QuoteInclude;
+
+/**
+ * Reserves warehouse stock for each just-created QuoteItem, matching each
+ * one back to the source input by productId to find its (optional)
+ * client-supplied warehouse split. Must run inside the same transaction
+ * that created the items.
+ */
+async function reserveForItems(
+  tx: Prisma.TransactionClient,
+  createdItems: { id: string; productId: string; quantity: number }[],
+  sourceItems: QuoteItemInput[],
+  requester: PriorityRequesterContext,
+  shippingLocation?: string | null
+) {
+  const bySourceProductId = new Map(sourceItems.map((item) => [item.productId, item]));
+  for (const item of createdItems) {
+    const source = bySourceProductId.get(item.productId);
+    await reserveAllocationsForItem(
+      tx,
+      item.id,
+      item.productId,
+      item.quantity,
+      source?.allocations,
+      requester,
+      shippingLocation ?? undefined
+    );
+  }
+}
 
 interface ResolvedLineItem {
   productId: string;
   quantity: number;
   unitPrice: Prisma.Decimal;
+  cost: Prisma.Decimal;
 }
 
 /**
@@ -48,6 +110,7 @@ async function resolveLineItems(
       productId: product.id,
       quantity: item.quantity,
       unitPrice: product.unitPrice,
+      cost: product.cost,
     };
   });
 }
@@ -120,7 +183,13 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
   return prisma.$transaction(async (tx) => {
     let customerId = input.customerId;
     let requestItems: { productId: string; quantity: number }[] = [];
-    let customerRequest: { id: string; customerId: string } | null = null;
+    let customerRequest: {
+      id: string;
+      customerId: string;
+      isRecurring: boolean;
+      billingCycle: BillingCycle | null;
+      shippingLocation: string | null;
+    } | null = null;
 
     if (input.customerRequestId) {
       const request = await tx.customerRequest.findUnique({
@@ -164,8 +233,12 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
       throw ApiError.badRequest("Customer not found");
     }
 
-    const sourceItems: QuoteItemInput[] =
-      input.items && input.items.length > 0 ? input.items : requestItems;
+    // A request-based quote's composition is fixed by what the customer
+    // actually asked for - input.items is only honored when there's no
+    // customerRequest to derive it from, never as an override of one.
+    const sourceItems: QuoteItemInput[] = customerRequest
+      ? requestItems
+      : input.items ?? [];
     const resolvedItems = await resolveLineItems(tx, sourceItems);
     const discountPercentage = new Prisma.Decimal(input.discountPercentage ?? 0);
     const taxPercentage = new Prisma.Decimal(input.taxPercentage ?? 0);
@@ -179,11 +252,25 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
         salesRepId,
         customerRequestId: customerRequest?.id,
         notes: input.notes,
+        isRecurring: customerRequest?.isRecurring ?? false,
+        billingCycle: customerRequest?.billingCycle,
+        shippingLocation: customerRequest?.shippingLocation ?? input.shippingLocation,
         ...totals,
         items: { create: toQuoteItemsCreateData(resolvedItems) },
       },
       include: QUOTE_INCLUDE,
     });
+
+    // Reserving immediately on creation - not deferred until submit/approval
+    // - is deliberate: the moment a quote exists with real quantities, that
+    // stock is spoken for, so Fulfillment reflects it for every role right
+    // away rather than only once the quote is later approved.
+    const requester: PriorityRequesterContext = {
+      customerName: customer.name,
+      tier: customer.tier,
+      marginPercent: computeMarginPercent(resolvedItems, discountPercentage),
+    };
+    await reserveForItems(tx, quote.items, sourceItems, requester, customerRequest?.shippingLocation);
 
     if (customerRequest) {
       await tx.customerRequest.update({
@@ -192,7 +279,8 @@ export async function createQuote(input: CreateQuoteInput, salesRepId: string) {
       });
     }
 
-    return { quote, created: true };
+    const withAllocations = await tx.quote.findUniqueOrThrow({ where: { id: quote.id }, include: QUOTE_INCLUDE });
+    return { quote: withAllocations, created: true };
   });
 }
 
@@ -202,7 +290,10 @@ export async function updateQuote(
   user: AuthenticatedUser
 ) {
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.quote.findUnique({ where: { id: quoteId } });
+    const existing = await tx.quote.findUnique({
+      where: { id: quoteId },
+      include: { items: true, customer: true, customerRequest: { include: { items: true } } },
+    });
     if (!existing) {
       throw ApiError.notFound("Quote not found");
     }
@@ -213,24 +304,66 @@ export async function updateQuote(
       throw ApiError.badRequest("Only draft or revision-required quotes can be edited");
     }
 
-    const resolvedItems = await resolveLineItems(tx, input.items);
+    // A quote built from a customer request never trusts the client for
+    // what's on it or how much - the request's own items are authoritative,
+    // and only that request's products can carry a warehouse-allocation
+    // choice through. This makes the "quantity is fixed" rule a backend
+    // guarantee, not just a frontend restriction that a direct API call
+    // could bypass.
+    const sourceItems: QuoteItemInput[] = existing.customerRequest
+      ? existing.customerRequest.items.map((requestItem) => {
+          const clientAllocations = input.items.find(
+            (item) => item.productId === requestItem.productId
+          )?.allocations;
+          return {
+            productId: requestItem.productId,
+            quantity: requestItem.requestedQuantity,
+            allocations: clientAllocations,
+          };
+        })
+      : input.items;
+
+    const resolvedItems = await resolveLineItems(tx, sourceItems);
     const discountPercentage = new Prisma.Decimal(
       input.discountPercentage ?? existing.discountPercentage
     );
     const taxPercentage = new Prisma.Decimal(input.taxPercentage ?? existing.taxPercentage);
     const totals = calculateTotals(resolvedItems, discountPercentage, taxPercentage);
+    // A request-based quote's shipping location is fixed by the request that
+    // created it, same reasoning as sourceItems above - only a manually
+    // started quote (no customerRequest) lets the Sales Rep set/edit it here.
+    const shippingLocation = existing.customerRequest
+      ? existing.shippingLocation
+      : input.shippingLocation ?? existing.shippingLocation;
 
+    // Release whatever this quote currently has reserved BEFORE the items
+    // are replaced - reads the still-live allocation rows, then the
+    // deleteMany below cascades them away along with the old items.
+    await releaseAllocationsForItems(
+      tx,
+      existing.items.map((item) => item.id)
+    );
     await tx.quoteItem.deleteMany({ where: { quoteId } });
 
-    return tx.quote.update({
+    const updated = await tx.quote.update({
       where: { id: quoteId },
       data: {
         notes: input.notes,
+        shippingLocation,
         ...totals,
         items: { create: toQuoteItemsCreateData(resolvedItems) },
       },
       include: QUOTE_INCLUDE,
     });
+
+    const requester: PriorityRequesterContext = {
+      customerName: existing.customer.name,
+      tier: existing.customer.tier,
+      marginPercent: computeMarginPercent(resolvedItems, discountPercentage),
+    };
+    await reserveForItems(tx, updated.items, sourceItems, requester, shippingLocation);
+
+    return tx.quote.findUniqueOrThrow({ where: { id: quoteId }, include: QUOTE_INCLUDE });
   });
 }
 
@@ -238,7 +371,7 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.quote.findUnique({
       where: { id: quoteId },
-      include: { items: { include: { product: true } }, customer: true },
+      include: { items: { include: { product: true } }, customer: true, customerRequest: true },
     });
     if (!existing) {
       throw ApiError.notFound("Quote not found");
@@ -251,6 +384,35 @@ export async function submitQuote(quoteId: string, user: AuthenticatedUser) {
     }
     if (existing.items.length === 0) {
       throw ApiError.badRequest("Cannot submit a quote with no items");
+    }
+
+    // Discount-expectation gate: the Rep can't send a lower discount than
+    // the customer asked for straight to Manager/Finance approval - it's
+    // flagged for the customer to resolve first (portal's Negotiations
+    // tab), and the quote stays in its current editable status (not
+    // submitted) until they do. See customerPortal.service.ts's
+    // resolveDiscountReview for the other half of this.
+    if (existing.customerRequest) {
+      const expected = existing.customerRequest.expectedDiscountPercentage;
+      if (expected != null && existing.discountPercentage.lessThan(expected)) {
+        await tx.customerRequest.update({
+          where: { id: existing.customerRequest.id },
+          data: {
+            proposedDiscountPercentage: existing.discountPercentage,
+            discountReviewStatus: DiscountReviewStatus.PENDING,
+          },
+        });
+        return tx.quote.findUniqueOrThrow({ where: { id: quoteId }, include: QUOTE_INCLUDE });
+      }
+      // The Rep's discount now meets/exceeds what the customer asked for -
+      // clear any stale flag from an earlier, lower attempt so it doesn't
+      // linger unresolved in the customer's Negotiations tab.
+      if (existing.customerRequest.discountReviewStatus === DiscountReviewStatus.PENDING) {
+        await tx.customerRequest.update({
+          where: { id: existing.customerRequest.id },
+          data: { discountReviewStatus: DiscountReviewStatus.NONE, proposedDiscountPercentage: null },
+        });
+      }
     }
 
     const totals = calculateTotals(
@@ -333,6 +495,50 @@ export async function markStockUnavailable(quoteId: string, user: AuthenticatedU
       data: { quoteId, userId: user.id, action: QuoteAuditAction.STOCK_UNAVAILABLE, note },
     });
 
+    // The order won't be fulfilled from this reservation - free the stock
+    // back up for other orders.
+    await releaseAllocationsForQuote(tx, quoteId);
+
     return tx.quote.findUniqueOrThrow({ where: { id: quoteId }, include: QUOTE_INCLUDE });
+  });
+}
+
+/**
+ * Permanently removes a draft the Sales Rep never submitted. Only DRAFT
+ * (never REVISION_REQUIRED - that status carries a real approver/customer
+ * history worth keeping, and the Rep is expected to revise and resubmit it,
+ * not discard it). If it came from a CustomerRequest, that request flips
+ * back to IN_REVIEW - same mechanism a customer negotiation uses - so it
+ * reappears in the Rep's active queue instead of staying stuck on a quote
+ * that no longer exists.
+ */
+export async function deleteQuoteDraft(quoteId: string, user: AuthenticatedUser) {
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.quote.findUnique({ where: { id: quoteId } });
+    if (!existing) {
+      throw ApiError.notFound("Quote not found");
+    }
+    if (existing.salesRepId !== user.id) {
+      throw ApiError.forbidden("You can only delete your own quotes");
+    }
+    if (existing.status !== QuoteStatus.DRAFT) {
+      throw ApiError.badRequest("Only draft quotes can be deleted");
+    }
+
+    // Release reservations before the cascade delete below removes the
+    // allocation rows out from under it.
+    await releaseAllocationsForQuote(tx, quoteId);
+
+    const result = await tx.quote.deleteMany({ where: { id: quoteId, status: existing.status } });
+    if (result.count === 0) {
+      throw ApiError.conflict("This quote just changed - please refresh and try again");
+    }
+
+    if (existing.customerRequestId) {
+      await tx.customerRequest.update({
+        where: { id: existing.customerRequestId },
+        data: { status: CustomerRequestStatus.IN_REVIEW },
+      });
+    }
   });
 }

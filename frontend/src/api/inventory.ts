@@ -8,10 +8,15 @@ export async function getProductAvailability(productId: string) {
   return res.data.data;
 }
 
-export async function getStockAllocation(productId: string, quantity: number) {
+export async function getStockAllocation(
+  productId: string,
+  quantity: number,
+  excludeQuoteItemId?: string,
+  destinationLocation?: string
+) {
   const res = await apiClient.get<{ success: true; data: StockAllocationResult }>(
     `/inventory/product/${productId}/allocation`,
-    { params: { quantity } }
+    { params: { quantity, excludeQuoteItemId, destinationLocation } }
   );
   return res.data.data;
 }

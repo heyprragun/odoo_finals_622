@@ -1,9 +1,5 @@
 import { apiClient } from "./client";
-import type {
-  CompanySubscriptionDetail,
-  SubscriptionListItem,
-  SubscriptionsSummary,
-} from "../types/sales";
+import type { CompanySubscriptionDetail, SubscriptionListItem, SubscriptionsSummary } from "../types/sales";
 
 export interface SubscriptionsListResponse {
   summary: SubscriptionsSummary;

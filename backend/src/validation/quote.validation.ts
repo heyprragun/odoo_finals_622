@@ -1,8 +1,16 @@
 import { z } from "zod";
 
+const allocationInputSchema = z.object({
+  warehouseId: z.string().uuid("Invalid warehouse id"),
+  quantity: z.number().int("Quantity must be a whole number").positive("Quantity must be positive"),
+});
+
 export const quoteItemInputSchema = z.object({
   productId: z.string().uuid("Invalid product id"),
   quantity: z.number().int("Quantity must be a whole number").positive("Quantity must be positive"),
+  // Optional - the Sales Rep's own warehouse split for this line. Omit (or
+  // send an empty array) to fall back to the auto-suggested greedy split.
+  allocations: z.array(allocationInputSchema).optional(),
 });
 
 // Governance (customer-tier discount ceilings, category ceilings, risk-based
@@ -21,6 +29,10 @@ export const createQuoteSchema = z
     items: z.array(quoteItemInputSchema).optional(),
     discountPercentage: percentageSchema.optional(),
     taxPercentage: percentageSchema.optional(),
+    // Only honored for a manually-started quote (no customerRequestId) -
+    // a request-based quote's shipping location always comes from the
+    // request itself (see quote.service.ts's createQuote).
+    shippingLocation: z.string().trim().max(200).optional(),
   })
   .refine((data) => Boolean(data.customerId) || Boolean(data.customerRequestId), {
     message: "Either customerId or customerRequestId is required",
@@ -32,6 +44,9 @@ export const updateQuoteSchema = z.object({
   items: z.array(quoteItemInputSchema),
   discountPercentage: percentageSchema.optional(),
   taxPercentage: percentageSchema.optional(),
+  // Same restriction as above - ignored server-side for a request-based
+  // quote, which keeps the request's own shipping location instead.
+  shippingLocation: z.string().trim().max(200).optional(),
 });
 
 export const markStockUnavailableSchema = z.object({

@@ -44,7 +44,11 @@ Rules:
 - Respond with ONLY valid JSON, no markdown, in exactly this shape:
 {"upsell":[{"sku":"...","reason":"..."}],"crossSell":[{"sku":"...","reason":"..."}]}`;
 
-async function callGroq(userContent: string): Promise<string> {
+// Low-level Groq chat-completion call, shared by every AI feature in this
+// app (upsell/cross-sell recommendations, sales report insights, and
+// whatever comes next) - each caller supplies its own system prompt and
+// parses the returned JSON string for its own shape.
+export async function callGroq(systemPrompt: string, userContent: string): Promise<string> {
   let response: Awaited<ReturnType<typeof fetch>>;
   try {
     response = await fetch(GROQ_ENDPOINT, {
@@ -58,24 +62,24 @@ async function callGroq(userContent: string): Promise<string> {
         temperature: 0.3,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
       }),
     });
   } catch {
-    throw new ApiError(502, "Could not reach the AI recommendation service");
+    throw new ApiError(502, "Could not reach the AI service");
   }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new ApiError(502, `AI recommendation service returned an error (${response.status}): ${body.slice(0, 200)}`);
+    throw new ApiError(502, `AI service returned an error (${response.status}): ${body.slice(0, 200)}`);
   }
 
   const payload = (await response.json()) as { choices?: { message?: { content?: string } }[] };
   const content = payload.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
-    throw new ApiError(502, "AI recommendation service returned an unexpected response");
+    throw new ApiError(502, "AI service returned an unexpected response");
   }
   return content;
 }
@@ -96,7 +100,7 @@ export async function generateRecommendations(
   quoteItems: QuoteItemEntry[]
 ): Promise<RecommendationResult> {
   const userContent = JSON.stringify({ catalog, quoteItems });
-  const rawContent = await callGroq(userContent);
+  const rawContent = await callGroq(SYSTEM_PROMPT, userContent);
 
   let parsed: unknown;
   try {

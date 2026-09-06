@@ -1,5 +1,6 @@
 import {
   CustomerRequestStatus,
+  DiscountReviewStatus,
   InvoiceStatus,
   Prisma,
   QuoteAuditAction,
@@ -10,6 +11,8 @@ import {
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
 import { calculateTotals } from "./quote.service";
+import { releaseAllocationsForQuote } from "./inventory.service";
+import { cancelSubscription } from "./subscription.service";
 import type {
   AcceptRecommendationInput,
   CreateMyRequestInput,
@@ -51,6 +54,11 @@ const ORDER_INCLUDE = {
       // still awaiting the Sales Rep's own review, or already
       // accepted/declined, don't need a badge.
       _count: { select: { recommendations: { where: { status: RecommendationStatus.SENT_TO_CUSTOMER } } } },
+      // Only ever consulted for a MANAGER_CANCELLED entry (see
+      // formatOrderListItem) - a Manager/Admin unwinding a confirmed order
+      // from Deal Health is unprompted news to the customer and needs a
+      // reason, unlike their own CUSTOMER_CANCELLED (they already know why).
+      auditEntries: { orderBy: { createdAt: "desc" as const }, take: 1 },
     },
   },
 } satisfies Prisma.CustomerRequestInclude;
@@ -58,6 +66,7 @@ const ORDER_INCLUDE = {
 type OrderRow = Prisma.CustomerRequestGetPayload<{ include: typeof ORDER_INCLUDE }>;
 
 function formatOrderListItem(request: OrderRow) {
+  const latestEntry = request.quote?.auditEntries[0];
   return {
     id: request.id,
     status: deriveOrderStatus(request, request.quote?.status),
@@ -68,6 +77,11 @@ function formatOrderListItem(request: OrderRow) {
     })),
     expectedDiscountPercentage: toNumber(request.expectedDiscountPercentage),
     notes: request.notes,
+    shippingLocation: request.shippingLocation,
+    cancellationReason:
+      request.status === CustomerRequestStatus.CANCELLED && latestEntry?.action === QuoteAuditAction.MANAGER_CANCELLED
+        ? latestEntry.note
+        : null,
     createdAt: request.createdAt,
     pendingRecommendationCount: request.quote?._count.recommendations ?? 0,
   };
@@ -187,6 +201,9 @@ export async function cancelMyOrder(
             note: reason?.trim() || "Cancelled by customer",
           },
         });
+        // The order won't be fulfilled from this reservation - free the
+        // stock back up for other orders.
+        await releaseAllocationsForQuote(tx, request.quote.id);
       }
     }
   });
@@ -194,20 +211,104 @@ export async function cancelMyOrder(
   return getMyOrderDetail(orderId, customerId);
 }
 
-export async function listMyActiveSubscriptions(customerId: string) {
+// Every one of this customer's subscriptions regardless of status - unlike
+// the old ACTIVE-only list, cancelled/paused ones stay visible for history
+// (and so a cancelled one's detail page still works after the fact).
+export async function listMySubscriptions(customerId: string) {
   const subscriptions = await prisma.subscription.findMany({
-    where: { customerId, status: SubscriptionStatus.ACTIVE },
+    where: { customerId },
     include: { product: true },
-    orderBy: { nextBillingDate: "asc" },
+    orderBy: [{ status: "asc" }, { nextBillingDate: "asc" }],
   });
 
   return subscriptions.map((sub) => ({
     id: sub.id,
     productName: sub.product.name,
     quantity: sub.quantity,
+    unitPrice: Number(sub.unitPrice),
     billingCycle: sub.billingCycle,
+    status: sub.status,
     nextBillingDate: sub.nextBillingDate,
   }));
+}
+
+// Blocks a second plan-change request from being opened against the same
+// subscription while an earlier one hasn't reached a terminal outcome yet
+// (mirrors the "one pending tier-change at a time" rule in
+// customerTierChange.service.ts). A request with no quote yet (still
+// NEW/IN_REVIEW) always blocks; once it has a quote, only that quote's own
+// status decides whether the attempt is still "in flight."
+const TERMINAL_QUOTE_STATUSES: QuoteStatus[] = [QuoteStatus.APPROVED, QuoteStatus.REJECTED, QuoteStatus.CANCELLED];
+
+async function hasPendingPlanChange(subscriptionId: string): Promise<boolean> {
+  const requests = await prisma.customerRequest.findMany({
+    where: { modifiesSubscriptionId: subscriptionId, status: { not: CustomerRequestStatus.CANCELLED } },
+    include: { quote: { select: { status: true } } },
+  });
+  return requests.some((r) => !r.quote || !TERMINAL_QUOTE_STATUSES.includes(r.quote.status));
+}
+
+export async function getMySubscriptionDetail(subscriptionId: string, customerId: string) {
+  const sub = await prisma.subscription.findUnique({
+    where: { id: subscriptionId },
+    include: { product: true, events: { orderBy: { createdAt: "desc" } } },
+  });
+  if (!sub) {
+    throw ApiError.notFound("Subscription not found");
+  }
+  if (sub.customerId !== customerId) {
+    throw ApiError.forbidden("You can only view your own subscriptions");
+  }
+
+  const pendingPlanChange = await hasPendingPlanChange(subscriptionId);
+  const isActive = sub.status === SubscriptionStatus.ACTIVE;
+
+  return {
+    id: sub.id,
+    productId: sub.productId,
+    productName: sub.product.name,
+    sku: sub.product.sku,
+    quantity: sub.quantity,
+    unitPrice: Number(sub.unitPrice),
+    billingCycle: sub.billingCycle,
+    status: sub.status,
+    startDate: sub.startDate,
+    nextBillingDate: sub.nextBillingDate,
+    cancellable: isActive,
+    // Blocked while a plan change is already in flight - approving it will
+    // cancel this exact subscription anyway, so a second concurrent request
+    // against it would be meaningless.
+    modifiable: isActive && !pendingPlanChange,
+    pendingPlanChange,
+    events: sub.events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      amount: event.amount === null ? null : Number(event.amount),
+      note: event.note,
+      createdAt: event.createdAt,
+    })),
+  };
+}
+
+/**
+ * Customer-initiated cancellation, distinct from Finance/Admin's own
+ * subscription.service.ts actions (same underlying transition, different
+ * caller) - the note makes clear to every internal role browsing the
+ * Subscriptions list/company detail that the customer, not an approver,
+ * ended this.
+ */
+export async function cancelMySubscription(subscriptionId: string, customerId: string, reason: string | undefined) {
+  const sub = await prisma.subscription.findUnique({ where: { id: subscriptionId } });
+  if (!sub) {
+    throw ApiError.notFound("Subscription not found");
+  }
+  if (sub.customerId !== customerId) {
+    throw ApiError.forbidden("You can only cancel your own subscriptions");
+  }
+
+  await cancelSubscription(subscriptionId, reason ? `Cancelled by customer: ${reason}` : "Cancelled by customer");
+
+  return getMySubscriptionDetail(subscriptionId, customerId);
 }
 
 export async function listMyInvoices(customerId: string) {
@@ -238,6 +339,31 @@ export async function createMyRequest(customerId: string, input: CreateMyRequest
     throw ApiError.badRequest("One or more selected products are unavailable");
   }
 
+  // A "Change Subscription Plan" request: the product/quantity are forced
+  // to match the subscription being modified exactly (this is a billing-
+  // cycle change, not a chance to also sneak in a quantity/product change),
+  // only the billing cycle may actually differ, the subscription must be
+  // this customer's own and currently ACTIVE, and only one such request can
+  // be in flight against it at a time.
+  if (input.modifiesSubscriptionId) {
+    const sub = await prisma.subscription.findUnique({ where: { id: input.modifiesSubscriptionId } });
+    if (!sub || sub.customerId !== customerId) {
+      throw ApiError.badRequest("Subscription not found");
+    }
+    if (sub.status !== SubscriptionStatus.ACTIVE) {
+      throw ApiError.badRequest("Only an active subscription's plan can be changed");
+    }
+    if (input.items.length !== 1 || input.items[0].productId !== sub.productId || input.items[0].quantity !== sub.quantity) {
+      throw ApiError.badRequest("A plan change keeps the same product and quantity - only the billing cycle can change");
+    }
+    if (!input.isRecurring || !input.billingCycle || input.billingCycle === sub.billingCycle) {
+      throw ApiError.badRequest("Choose a different billing cycle than the subscription's current one");
+    }
+    if (await hasPendingPlanChange(input.modifiesSubscriptionId)) {
+      throw ApiError.badRequest("A plan change for this subscription is already in progress");
+    }
+  }
+
   const request = await prisma.customerRequest.create({
     data: {
       customerId,
@@ -246,6 +372,10 @@ export async function createMyRequest(customerId: string, input: CreateMyRequest
         input.expectedDiscountPercentage !== undefined
           ? new Prisma.Decimal(input.expectedDiscountPercentage)
           : undefined,
+      isRecurring: input.isRecurring ?? false,
+      billingCycle: input.isRecurring ? input.billingCycle : undefined,
+      modifiesSubscriptionId: input.modifiesSubscriptionId,
+      shippingLocation: input.shippingLocation,
       items: {
         create: input.items.map((item) => ({
           productId: item.productId,
@@ -263,6 +393,9 @@ export async function createMyRequest(customerId: string, input: CreateMyRequest
     status: request.status,
     notes: request.notes,
     expectedDiscountPercentage: toNumber(request.expectedDiscountPercentage),
+    isRecurring: request.isRecurring,
+    billingCycle: request.billingCycle,
+    shippingLocation: request.shippingLocation,
     createdAt: request.createdAt,
     items: request.items.map((item) => ({
       productName: item.product.name,
@@ -486,4 +619,72 @@ export async function declineRecommendation(recommendationId: string, customerId
   if (result.count === 0) {
     throw ApiError.conflict("This recommendation just changed - please refresh and try again");
   }
+}
+
+function formatDiscountReview(request: {
+  id: string;
+  expectedDiscountPercentage: Prisma.Decimal | null;
+  proposedDiscountPercentage: Prisma.Decimal | null;
+  createdAt: Date;
+  items: { requestedQuantity: number; product: { name: string } }[];
+}) {
+  return {
+    id: request.id,
+    items: request.items.map((item) => ({ productName: item.product.name, quantity: item.requestedQuantity })),
+    expectedDiscountPercentage: toNumber(request.expectedDiscountPercentage),
+    proposedDiscountPercentage: toNumber(request.proposedDiscountPercentage),
+    createdAt: request.createdAt,
+  };
+}
+
+// Every order where the Sales Rep's offered discount fell short of what the
+// customer asked for (see quote.service.ts's submitQuote gate) - shown on
+// the portal's Negotiations tab until the customer resolves it below.
+export async function listMyDiscountReviews(customerId: string) {
+  const requests = await prisma.customerRequest.findMany({
+    where: { customerId, discountReviewStatus: DiscountReviewStatus.PENDING },
+    include: { items: { include: { product: true } } },
+    orderBy: { updatedAt: "desc" },
+  });
+  return requests.map(formatDiscountReview);
+}
+
+/**
+ * Resolves a discount shortfall - the customer either accepts the Rep's
+ * lower offer (newExpectedDiscountPercentage = the proposed value) or
+ * counters with a different ask. Either way this just updates
+ * expectedDiscountPercentage and clears the pending flag; the Rep's next
+ * submit attempt re-checks against whatever value lands here.
+ */
+export async function resolveDiscountReview(
+  requestId: string,
+  customerId: string,
+  newExpectedDiscountPercentage: number,
+  note: string | undefined
+) {
+  const request = await prisma.customerRequest.findUnique({ where: { id: requestId } });
+  if (!request) {
+    throw ApiError.notFound("Order not found");
+  }
+  if (request.customerId !== customerId) {
+    throw ApiError.forbidden("You can only resolve your own orders");
+  }
+  if (request.discountReviewStatus !== DiscountReviewStatus.PENDING) {
+    throw ApiError.badRequest("There is no discount review pending for this order");
+  }
+
+  const result = await prisma.customerRequest.updateMany({
+    where: { id: requestId, discountReviewStatus: DiscountReviewStatus.PENDING },
+    data: {
+      expectedDiscountPercentage: new Prisma.Decimal(newExpectedDiscountPercentage),
+      proposedDiscountPercentage: null,
+      discountReviewStatus: DiscountReviewStatus.NONE,
+      notes: note ? `${request.notes ? `${request.notes} | ` : ""}${note}` : request.notes,
+    },
+  });
+  if (result.count === 0) {
+    throw ApiError.conflict("This order just changed - please refresh and try again");
+  }
+
+  return listMyDiscountReviews(customerId);
 }

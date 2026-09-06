@@ -124,10 +124,20 @@ export function CustomerOrderDetail() {
           <span>{order.expectedDiscountPercentage !== null ? `${order.expectedDiscountPercentage}%` : "—"}</span>
         </div>
         <div className="quote-summary-row">
+          <span>Ship To</span>
+          <span>{order.shippingLocation ?? "—"}</span>
+        </div>
+        <div className="quote-summary-row">
           <span>Comments</span>
           <span>{order.notes ?? "—"}</span>
         </div>
       </div>
+
+      {order.status === "CANCELLED" && order.cancellationReason && (
+        <div className="banner-error">
+          This order was cancelled: {order.cancellationReason}
+        </div>
+      )}
 
       <CustomerRecommendations recommendations={order.recommendations} onActioned={reload} />
 

@@ -1,28 +1,75 @@
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* A small "something changed here" indicator on a nav tab - see
+   navAlerts.service.ts on the backend for what counts as an alert per tab.
+   Deliberately static, not pulsing - present but not naggy. */
+.nav-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
 .sales-nav {
   display: flex;
   gap: 0.25rem;
-  padding: 0 1.5rem;
-  background: #fff;
-  border-bottom: 1px solid #e5e5e5;
+  padding: 0 0.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
+}
+
+.sales-nav-brand {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--color-border);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--color-text);
+  white-space: nowrap;
 }
 
 .sales-nav-tab {
   padding: 0.85rem 0.9rem;
   font-size: 0.88rem;
-  color: #555;
+  color: var(--color-text-muted);
   text-decoration: none;
   white-space: nowrap;
   border-bottom: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .sales-nav-tab:hover {
-  color: #1a1a1a;
+  color: var(--color-text);
 }
 
 .sales-nav-tab.active {
-  color: #2f6fed;
-  border-bottom-color: #2f6fed;
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
   font-weight: 600;
 }
 
@@ -30,6 +77,39 @@
   max-width: 960px;
   margin: 0 auto;
   padding: 2rem 1.5rem 4rem;
+}
+
+/* The "page transition" feel: each top-level block settles in with a very
+   short, subtle stagger rather than the whole page fading in as one flat
+   unit - kept brief and low-amplitude so it reads as a crisp, responsive
+   tool rather than a "look at this" reveal. Capped at 6 steps so a long
+   page doesn't feel slow to finish. */
+.sales-page > * {
+  animation: fadeInUp 240ms var(--ease-premium) both;
+}
+
+.sales-page > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.sales-page > *:nth-child(2) {
+  animation-delay: 25ms;
+}
+
+.sales-page > *:nth-child(3) {
+  animation-delay: 50ms;
+}
+
+.sales-page > *:nth-child(4) {
+  animation-delay: 75ms;
+}
+
+.sales-page > *:nth-child(5) {
+  animation-delay: 100ms;
+}
+
+.sales-page > *:nth-child(n + 6) {
+  animation-delay: 125ms;
 }
 
 .sales-header {
@@ -42,26 +122,29 @@
 }
 
 .sales-header h1 {
-  margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.65rem;
 }
 
 .sales-back-link {
   font-size: 0.9rem;
-  color: #2f6fed;
+  color: var(--color-info);
   text-decoration: none;
+  transition: color var(--transition-fast);
 }
 
 .sales-back-link:hover {
+  color: var(--color-info-hover);
   text-decoration: underline;
 }
 
 .sales-card {
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   padding: 1.5rem;
   margin-bottom: 1.25rem;
+  transition: box-shadow var(--transition-base);
 }
 
 .sales-card h2 {
@@ -77,22 +160,30 @@
 }
 
 .sales-stat {
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   padding: 1.25rem;
   text-align: center;
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.sales-stat:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .sales-stat .value {
-  font-size: 2rem;
-  font-weight: 600;
-  color: #2f6fed;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-primary);
 }
 
 .sales-stat .label {
   font-size: 0.85rem;
-  color: #555;
+  color: var(--color-text-muted);
   margin-top: 0.25rem;
 }
 
@@ -111,61 +202,151 @@
 .sales-table th,
 .sales-table td {
   text-align: left;
-  padding: 0.6rem 0.5rem;
-  border-bottom: 1px solid #eee;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sales-table thead {
+  background: var(--color-bg);
 }
 
 .sales-table th {
-  color: #666;
+  color: var(--color-text-muted);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.sales-table tbody tr {
+  transition: background-color var(--transition-fast);
+}
+
+.sales-table tbody tr:hover {
+  background: var(--color-bg);
+}
+
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.sortable-th:hover {
+  color: var(--color-text);
+}
+
+.sort-indicator {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.75em;
+  color: var(--color-text-faint);
+}
+
+.sort-indicator.active {
+  color: var(--color-primary);
+}
+
+.table-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.table-toolbar input[type="text"],
+.table-toolbar input[type="search"] {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.86rem;
+  min-width: 220px;
+  transition: border-color var(--transition-fast);
+}
+
+.table-toolbar input[type="text"]:focus-visible,
+.table-toolbar input[type="search"]:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .sales-empty {
-  color: #777;
+  color: var(--color-text-faint);
   font-size: 0.9rem;
   padding: 1rem 0;
 }
 
 .sales-btn {
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background: #fff;
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
   cursor: pointer;
-  font-size: 0.88rem;
-  color: #1a1a1a;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--color-text);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .sales-btn:hover {
-  background: #f4f5f7;
+  background: var(--color-bg);
+  border-color: var(--color-text-faint);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.sales-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.sales-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
 }
 
 .sales-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .sales-btn-primary {
-  background: #2f6fed;
-  border-color: #2f6fed;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
 .sales-btn-primary:hover {
-  background: #275cc4;
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.sales-btn-primary:active {
+  background: var(--color-primary-active);
+  border-color: var(--color-primary-active);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(0);
 }
 
 .sales-btn-danger {
-  background: #fff;
-  border-color: #e5b6b1;
-  color: #b3261e;
+  background: var(--color-surface);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
 }
 
 .sales-btn-danger:hover {
-  background: #fdecea;
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
 }
 
 .status-badge {
@@ -180,17 +361,24 @@
 
 .status-NEW,
 .status-DRAFT {
-  background: #eef1fb;
-  color: #2f6fed;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .status-IN_REVIEW,
 .status-PENDING_MANAGER_APPROVAL,
 .status-PENDING_FINANCE_APPROVAL,
 .status-PENDING_ADMIN_APPROVAL,
-.status-IN_PROGRESS {
-  background: #fff4e0;
-  color: #b3720a;
+.status-IN_PROGRESS,
+.status-OPEN,
+.status-PENDING {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.status-RESOLVED {
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .status-QUOTED,
@@ -198,28 +386,28 @@
 .status-APPROVED,
 .status-ACTIVE,
 .status-PAID {
-  background: #e6f6ec;
-  color: #1b8a4a;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .status-REVISION_REQUIRED,
 .status-PAUSED,
 .status-UNPAID {
-  background: #fff4e0;
-  color: #b3720a;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .status-CANCELLED,
 .status-REJECTED,
 .status-DECLINED {
-  background: #fdecea;
-  color: #b3261e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .status-SENT_TO_CUSTOMER,
 .status-ACCEPTED {
-  background: #e6f6ec;
-  color: #1b8a4a;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .notification-badge {
@@ -228,7 +416,7 @@
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
-  background: #2f6fed;
+  background: var(--color-primary);
   color: #fff;
   margin-left: 0.4rem;
 }
@@ -239,8 +427,9 @@
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 600;
-  background: #f0f0f0;
-  color: #444;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
 }
 
 .qty-control {
@@ -252,20 +441,25 @@
 .qty-control button {
   width: 26px;
   height: 26px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
+  transition: background-color var(--transition-fast);
+}
+
+.qty-control button:hover {
+  background: var(--color-bg);
 }
 
 .qty-control input {
   width: 48px;
   text-align: center;
   padding: 0.3rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
 }
 
 .product-search-row {
@@ -278,9 +472,16 @@
 .product-search-row input,
 .product-search-row select {
   padding: 0.5rem 0.7rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
   font-size: 0.9rem;
+  transition: border-color var(--transition-fast);
+}
+
+.product-search-row input:focus-visible,
+.product-search-row select:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .product-search-row input {
@@ -288,9 +489,34 @@
   min-width: 180px;
 }
 
+/* Label above an input, used wherever a bare input's purpose isn't obvious
+   from context alone (e.g. Selling Price vs Cost) - sits inside a
+   .product-search-row, so it inherits that row's flex/gap layout and the
+   input/select styling above via descendant selectors. */
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 160px;
+}
+
+.field-group label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.field-group input,
+.field-group select {
+  width: 100%;
+}
+
 .warehouse-line {
   font-size: 0.82rem;
-  color: #555;
+  color: var(--color-text-muted);
 }
 
 .quote-summary-row {
@@ -303,33 +529,37 @@
 .quote-summary-row.total {
   font-weight: 700;
   font-size: 1.05rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--color-border);
   margin-top: 0.4rem;
   padding-top: 0.6rem;
 }
 
-.banner-error {
-  background: #fdecea;
-  color: #b3261e;
+.banner-error,
+.banner-success {
   padding: 0.6rem 0.8rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 0.85rem;
   margin-bottom: 1rem;
+  border-left: 3px solid transparent;
+  animation: fadeInUp 220ms var(--ease-premium) both;
+}
+
+.banner-error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-left-color: var(--color-danger);
 }
 
 .banner-success {
-  background: #e6f6ec;
-  color: #1b8a4a;
-  padding: 0.6rem 0.8rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-bottom: 1rem;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-left-color: var(--color-success);
 }
 
 .view-toggle {
   display: inline-flex;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   margin-left: auto;
 }
@@ -337,18 +567,19 @@
 .view-toggle-btn {
   padding: 0.5rem 0.9rem;
   border: none;
-  background: #fff;
+  background: var(--color-surface);
   font-size: 0.85rem;
-  color: #555;
+  color: var(--color-text-muted);
   cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .view-toggle-btn + .view-toggle-btn {
-  border-left: 1px solid #ccc;
+  border-left: 1px solid var(--color-border-strong);
 }
 
 .view-toggle-btn.active {
-  background: #2f6fed;
+  background: var(--color-primary);
   color: #fff;
 }
 
@@ -361,8 +592,8 @@
 }
 
 .kanban-column {
-  background: #eef0f3;
-  border-radius: 8px;
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
   padding: 0.75rem;
   min-width: 220px;
 }
@@ -373,15 +604,15 @@
   align-items: center;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #444;
+  color: var(--color-text-muted);
   padding: 0.25rem 0.35rem 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 .kanban-count {
-  background: #dfe3e8;
-  color: #444;
+  background: var(--color-border);
+  color: var(--color-text-muted);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
   font-size: 0.75rem;
@@ -396,16 +627,19 @@
 
 .kanban-card {
   display: block;
-  background: #fff;
-  border-radius: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   padding: 0.75rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-xs);
   text-decoration: none;
-  color: #1a1a1a;
+  color: var(--color-text);
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
 }
 
 .kanban-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .kanban-card-title {
@@ -416,19 +650,19 @@
 
 .kanban-card-customer {
   font-size: 0.82rem;
-  color: #555;
+  color: var(--color-text-muted);
   margin-bottom: 0.4rem;
 }
 
 .kanban-card-total {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #2f6fed;
+  color: var(--color-primary);
 }
 
 .page-subtitle {
   margin: 0.25rem 0 0;
-  color: #666;
+  color: var(--color-text-muted);
   font-size: 0.88rem;
 }
 
@@ -437,7 +671,7 @@
   align-items: center;
   gap: 0.4rem;
   font-size: 0.88rem;
-  color: #444;
+  color: var(--color-text);
   cursor: pointer;
 }
 
@@ -446,7 +680,7 @@
 }
 
 .clickable-row:hover {
-  background: #f4f5f7;
+  background: var(--color-bg);
 }
 
 .risk-badge {
@@ -458,18 +692,18 @@
 }
 
 .risk-LOW {
-  background: #e6f6ec;
-  color: #1b8a4a;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .risk-MEDIUM {
-  background: #fff4e0;
-  color: #b3720a;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .risk-HIGH {
-  background: #fdecea;
-  color: #b3261e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .approval-badges {
@@ -480,18 +714,52 @@
 }
 
 .over-limit {
-  color: #b3261e;
+  color: var(--color-danger);
   font-weight: 600;
 }
 
 .within-limit {
-  color: #1b8a4a;
+  color: var(--color-success);
 }
 
 .explainer-text {
-  color: #666;
+  color: var(--color-text-muted);
   font-size: 0.85rem;
   margin: 1rem 0 0;
+}
+
+.discussion-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.discussion-message {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.75rem;
+}
+
+.discussion-message.own {
+  border-left-color: var(--color-primary);
+}
+
+.discussion-message-meta {
+  font-size: 0.82rem;
+  margin-bottom: 0.2rem;
+}
+
+.discussion-message-time {
+  color: var(--color-text-faint);
+  font-size: 0.78rem;
+}
+
+.discussion-message-text {
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .workflow-stepper {
@@ -510,33 +778,73 @@
 .workflow-step {
   padding: 0.5rem 1rem;
   border-radius: 999px;
-  background: #eef0f3;
-  color: #777;
+  background: var(--color-bg);
+  color: var(--color-text-faint);
   font-size: 0.85rem;
   font-weight: 600;
+  transition: background-color var(--transition-base), color var(--transition-base);
 }
 
 .workflow-step.done {
-  background: #e6f6ec;
-  color: #1b8a4a;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .workflow-step.current {
-  background: #2f6fed;
+  background: var(--color-primary);
   color: #fff;
 }
 
 .workflow-arrow {
-  color: #aaa;
+  color: var(--color-text-faint);
 }
 
 .recommendations-panel {
-  border: 1px dashed #ccc;
-  border-radius: 8px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
   padding: 1.25rem;
   text-align: center;
-  color: #888;
+  color: var(--color-text-faint);
   font-size: 0.85rem;
+}
+
+/* The "what if this were added" commercial-impact preview on a Recommendation
+   row - see RecommendationsPanel.tsx's computeImpact. Purely client-side,
+   never persisted. */
+.impact-panel {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  animation: fadeIn 150ms var(--ease-premium) both;
+}
+
+.impact-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.impact-label {
+  color: var(--color-text-muted);
+}
+
+.impact-value {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.impact-value.positive {
+  color: var(--color-success);
+}
+
+.impact-value.negative {
+  color: var(--color-danger);
 }
 
 .dealhealth-banners {
@@ -547,11 +855,20 @@
 }
 
 .dealhealth-banner {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 1.1rem 1.25rem;
   border-left: 4px solid transparent;
-  background: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.dealhealth-banner:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .dealhealth-banner-count {
@@ -568,32 +885,111 @@
 .dealhealth-banner-desc {
   margin: 0.4rem 0 0;
   font-size: 0.78rem;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .dealhealth-banner.stalled {
-  border-left-color: #b3720a;
+  border-left-color: var(--color-warning);
 }
 
 .dealhealth-banner.stalled .dealhealth-banner-count,
 .dealhealth-banner.stalled .dealhealth-banner-label {
-  color: #b3720a;
+  color: var(--color-warning);
 }
 
 .dealhealth-banner.anomaly {
-  border-left-color: #b3261e;
+  border-left-color: var(--color-danger);
 }
 
 .dealhealth-banner.anomaly .dealhealth-banner-count,
 .dealhealth-banner.anomaly .dealhealth-banner-label {
-  color: #b3261e;
+  color: var(--color-danger);
 }
 
 .dealhealth-banner.slippage {
-  border-left-color: #2f6fed;
+  border-left-color: var(--color-info);
 }
 
 .dealhealth-banner.slippage .dealhealth-banner-count,
 .dealhealth-banner.slippage .dealhealth-banner-label {
-  color: #2f6fed;
+  color: var(--color-info);
+}
+
+.flag-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.flag-badge.flag-STALLED {
+  background: var(--color-warning);
+}
+
+.flag-badge.flag-DISCOUNT_ANOMALY {
+  background: var(--color-danger);
+}
+
+.flag-badge.flag-DELIVERY_SLIPPAGE {
+  background: var(--color-info);
+}
+
+.reports-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reports-tab {
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.reports-tab:hover {
+  color: var(--color-text);
+}
+
+.reports-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: 600;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+  overflow-y: auto;
+  z-index: 100;
+  animation: fadeIn 150ms var(--ease-premium) both;
+}
+
+.modal-content {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  max-width: 720px;
+  width: 100%;
+  padding: 1.75rem;
+  box-shadow: var(--shadow-lg);
+  animation: fadeInUp 240ms var(--ease-premium) both;
+}
+
+.modal-close-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
 }

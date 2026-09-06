@@ -9,6 +9,7 @@ import {
   returnQuoteForRevision,
 } from "../../api/approvals";
 import type { ApprovalDetail as ApprovalDetailType } from "../../types/sales";
+import { TeamDiscussion } from "./TeamDiscussion";
 import "./sales.css";
 
 function formatCurrency(amount: number) {
@@ -187,7 +188,16 @@ export function ApprovalDetail() {
         )}
         {detail.workflow.outcome === "RETURNED" && (
           <div className="banner-error" style={{ marginTop: "1rem" }}>
-            This quotation was returned to the Sales Rep for revision.
+            <div>This quotation was returned to the Sales Rep for revision.</div>
+            {user?.role === "SALES_REP" && (
+              <Link
+                className="sales-btn sales-btn-primary"
+                to={`/sales/quotes/${detail.id}`}
+                style={{ marginTop: "0.75rem", display: "inline-block" }}
+              >
+                Edit Quote &amp; Resend
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -219,6 +229,8 @@ export function ApprovalDetail() {
           </table>
         )}
       </div>
+
+      <TeamDiscussion quoteId={detail.id} />
 
       {canAct && (
         <div className="sales-card">

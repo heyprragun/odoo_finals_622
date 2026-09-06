@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import type { Customer, CustomerRequest, CustomerRequestItem, Product, Quote } from "@prisma/client";
+import type { Customer, CustomerRequest, CustomerRequestItem, Product, Quote, Subscription } from "@prisma/client";
 import {
   listActiveCustomerRequests,
   getCustomerRequestById,
@@ -18,6 +18,7 @@ type RequestWithFullItems = CustomerRequest & {
   customer: Customer;
   items: (CustomerRequestItem & { product: Product })[];
   quote: LinkedQuoteSummary | null;
+  modifiesSubscription: (Subscription & { product: Product }) | null;
 };
 
 function summarize(request: RequestWithCustomerAndItems) {
@@ -42,10 +43,19 @@ function detail(request: RequestWithFullItems) {
     notes: request.notes,
     expectedDiscountPercentage:
       request.expectedDiscountPercentage === null ? null : Number(request.expectedDiscountPercentage),
+    shippingLocation: request.shippingLocation,
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
     quote: request.quote
       ? { id: request.quote.id, quoteNumber: request.quote.quoteNumber, status: request.quote.status }
+      : null,
+    modifiesSubscription: request.modifiesSubscription
+      ? {
+          id: request.modifiesSubscription.id,
+          productName: request.modifiesSubscription.product.name,
+          quantity: request.modifiesSubscription.quantity,
+          currentBillingCycle: request.modifiesSubscription.billingCycle,
+        }
       : null,
     items: request.items.map((item) => ({
       id: item.id,

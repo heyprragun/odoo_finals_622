@@ -76,8 +76,27 @@ export function CustomerRequestDetail() {
             <p>
               Status: <span className={`status-badge status-${request.status}`}>{request.status}</span>
             </p>
+            <p>
+              Customer's Expected Discount:{" "}
+              <strong>
+                {request.expectedDiscountPercentage !== null ? `${request.expectedDiscountPercentage}%` : "Not specified"}
+              </strong>
+            </p>
+            <p>
+              Ship To: <strong>{request.shippingLocation ?? "Not specified"}</strong>
+            </p>
             {request.notes && <p style={{ color: "#555" }}>Notes: {request.notes}</p>}
           </div>
+
+          {request.modifiesSubscription && (
+            <div className="banner-error">
+              This is a <strong>plan change request</strong> for an existing subscription:{" "}
+              <strong>{request.modifiesSubscription.productName}</strong> (x{request.modifiesSubscription.quantity}
+              ), currently billed <strong>{request.modifiesSubscription.currentBillingCycle}</strong>. Approving
+              the resulting quote will cancel that subscription and replace it with a new one on the requested
+              cycle below.
+            </div>
+          )}
 
           <div className="sales-card">
             <h2>Requested Products</h2>

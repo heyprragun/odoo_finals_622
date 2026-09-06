@@ -1,6 +1,9 @@
-import { InvoiceStatus, Prisma, ProductCategory } from "@prisma/client";
+import { InvoiceStatus, Prisma, Role } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { ApiError } from "../utils/ApiError";
+import { isSubscriptionLine } from "./subscription.service";
+import { buildInvoicePdfBuffer } from "./invoicePdf.service";
+import { sendInvoiceEmail } from "./email.service";
 
 async function generateInvoiceNumber(client: Prisma.TransactionClient): Promise<string> {
   const count = await client.invoice.count();
@@ -30,9 +33,7 @@ export async function createInvoicesForApprovedQuote(
   });
   if (!quote) return;
 
-  const oneTimeItems = quote.items.filter(
-    (item) => item.product.category !== ProductCategory.SUBSCRIPTION
-  );
+  const oneTimeItems = quote.items.filter((item) => !isSubscriptionLine(quote, item));
   const oneTimeAmount = oneTimeItems.reduce(
     (sum, item) => sum.add(item.lineTotal),
     new Prisma.Decimal(0)
@@ -107,7 +108,13 @@ export async function getInvoiceDetail(invoiceId: string) {
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
     include: {
-      customer: true,
+      // A Customer (company) has no email of its own - only a linked
+      // CUSTOMER-role User does, and there may be zero or several. This is
+      // only ever a prefill hint for the "Email Invoice" form (see
+      // emailInvoiceToCustomer below, which trusts nothing but the address
+      // Finance actually submits) - never treated as an authoritative
+      // billing contact.
+      customer: { include: { users: { where: { role: Role.CUSTOMER }, take: 1 } } },
       quote: { include: { items: { include: { product: true } } } },
       subscription: { include: { product: true } },
     },
@@ -118,6 +125,7 @@ export async function getInvoiceDetail(invoiceId: string) {
 
   return {
     ...formatListItem(invoice),
+    customerEmail: invoice.customer.users[0]?.email ?? null,
     paidAt: invoice.paidAt,
     quote: invoice.quote
       ? {
@@ -165,4 +173,58 @@ export async function markInvoiceAsPaid(invoiceId: string) {
   }
 
   return getInvoiceDetail(invoiceId);
+}
+
+/**
+ * Builds the invoice PDF for a single invoice - shared by the download
+ * endpoint and emailInvoiceToCustomer below, so the PDF a Finance user
+ * downloads and the one that gets emailed are byte-identical.
+ */
+export async function getInvoicePdfBuffer(invoiceId: string): Promise<{ invoiceNumber: string; buffer: Buffer }> {
+  const detail = await getInvoiceDetail(invoiceId);
+  const buffer = await buildInvoicePdfBuffer(detail);
+  return { invoiceNumber: detail.invoiceNumber, buffer };
+}
+
+/**
+ * Customer portal's own download - same PDF, but layered with the
+ * ownership + paid-only checks Finance's own download never needed (that
+ * one's already scoped to Finance/Admin at the route level, who can see
+ * every invoice regardless of status). A customer can only ever download
+ * their own invoices, and only once they're actually PAID - an unpaid
+ * invoice has nothing final to hand them yet.
+ */
+export async function getInvoicePdfBufferForCustomer(
+  invoiceId: string,
+  customerId: string
+): Promise<{ invoiceNumber: string; buffer: Buffer }> {
+  const detail = await getInvoiceDetail(invoiceId);
+  if (detail.customer.id !== customerId) {
+    throw ApiError.forbidden("You can only download your own invoices");
+  }
+  if (detail.status !== InvoiceStatus.PAID) {
+    throw ApiError.badRequest("Only paid invoices can be downloaded");
+  }
+  const buffer = await buildInvoicePdfBuffer(detail);
+  return { invoiceNumber: detail.invoiceNumber, buffer };
+}
+
+/**
+ * Emails the invoice PDF to whatever address Finance actually typed in -
+ * never trusts customerEmail's prefill hint as authoritative (a Customer
+ * company has no email of its own, see getInvoiceDetail above), only uses it
+ * to save Finance from having to look the address up separately.
+ */
+export async function emailInvoiceToCustomer(invoiceId: string, toEmail: string) {
+  const detail = await getInvoiceDetail(invoiceId);
+  const buffer = await buildInvoicePdfBuffer(detail);
+  return sendInvoiceEmail({
+    to: toEmail,
+    invoiceNumber: detail.invoiceNumber,
+    customerName: detail.customer.name,
+    amount: detail.amount,
+    dueDate: detail.dueDate,
+    status: detail.status,
+    pdfBuffer: buffer,
+  });
 }

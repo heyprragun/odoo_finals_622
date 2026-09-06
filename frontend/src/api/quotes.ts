@@ -8,6 +8,7 @@ export interface CreateQuotePayload {
   items?: QuoteItemInput[];
   discountPercentage?: number;
   taxPercentage?: number;
+  shippingLocation?: string;
 }
 
 export interface UpdateQuotePayload {
@@ -15,6 +16,7 @@ export interface UpdateQuotePayload {
   items: QuoteItemInput[];
   discountPercentage?: number;
   taxPercentage?: number;
+  shippingLocation?: string;
 }
 
 export async function listMyQuotes() {
@@ -47,4 +49,8 @@ export async function markStockUnavailable(id: string, note?: string) {
     note,
   });
   return res.data.data;
+}
+
+export async function deleteQuote(id: string) {
+  await apiClient.delete(`/quotes/${id}`);
 }

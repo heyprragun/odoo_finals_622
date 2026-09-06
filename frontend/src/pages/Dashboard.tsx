@@ -2,8 +2,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { SalesRepDashboard } from "./sales/SalesRepDashboard";
 import { SalesNav } from "./sales/SalesNav";
+import { GrievanceAlerts } from "./sales/GrievanceAlerts";
 import { CustomerNav } from "./customer/CustomerNav";
 import { CustomerDashboard } from "./customer/CustomerDashboard";
+import "./sales/sales.css";
 
 // Roles that can reach the internal Sales Workspace nav (Approvals in
 // particular needs Manager/Finance/Admin access, not just Sales Rep).
@@ -34,19 +36,9 @@ export function Dashboard() {
       >
         <div>
           <strong>{user?.name}</strong>
-          <span style={{ color: "#555", marginLeft: "0.5rem" }}>({user?.role})</span>
+          <span style={{ color: "var(--color-text-muted)", marginLeft: "0.5rem" }}>({user?.role})</span>
         </div>
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: "0.5rem 1rem",
-            background: "#e53935",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
+        <button className="sales-btn sales-btn-danger" onClick={handleLogout}>
           Logout
         </button>
       </div>
@@ -61,9 +53,11 @@ export function Dashboard() {
           <p style={{ fontSize: "1.1rem" }}>
             <strong>{user?.name}</strong>
           </p>
-          <p style={{ color: "#555" }}>Role: {user?.role}</p>
+          <p style={{ color: "var(--color-text-muted)" }}>Role: {user?.role}</p>
         </div>
       )}
+
+      {(user?.role === "MANAGER" || user?.role === "ADMIN") && <GrievanceAlerts />}
     </div>
   );
 }

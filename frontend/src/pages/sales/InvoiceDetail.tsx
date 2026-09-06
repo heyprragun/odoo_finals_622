@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { getInvoiceDetail, markInvoiceAsPaid } from "../../api/invoices";
+import { downloadInvoicePdf, emailInvoice, getInvoiceDetail, markInvoiceAsPaid } from "../../api/invoices";
 import type { InvoiceDetail as InvoiceDetailType } from "../../types/sales";
 import { NoAccessBlock } from "./NoAccessBlock";
 import "./sales.css";
@@ -15,67 +15,6 @@ function formatCycle(cycle: string) {
   return cycle.charAt(0) + cycle.slice(1).toLowerCase();
 }
 
-function buildSummaryText(detail: InvoiceDetailType): string {
-  const lines: string[] = [];
-  lines.push("DealFlow360 - Invoice Summary");
-  lines.push("=============================");
-  lines.push(`Invoice Number: ${detail.invoiceNumber}`);
-  lines.push(`Customer: ${detail.customer.name} (${detail.customer.tier})`);
-  lines.push(`Status: ${detail.status}`);
-  lines.push(`Issued Date: ${new Date(detail.issuedDate).toLocaleDateString()}`);
-  lines.push(`Due Date: ${new Date(detail.dueDate).toLocaleDateString()}`);
-  if (detail.paidAt) {
-    lines.push(`Paid Date: ${new Date(detail.paidAt).toLocaleDateString()}`);
-  }
-  lines.push(`Amount: ${formatCurrency(detail.amount)}`);
-  lines.push("");
-
-  if (detail.quote) {
-    lines.push("Order Details");
-    lines.push("-------------");
-    lines.push(`Order ID (Quote): ${detail.quote.quoteNumber}`);
-    lines.push(`Order Date: ${new Date(detail.quote.orderDate).toLocaleDateString()}`);
-    lines.push("");
-    lines.push("Line Items:");
-    for (const item of detail.quote.items) {
-      lines.push(
-        `- ${item.productName} (SKU: ${item.sku}) | Qty: ${item.quantity} | Unit Price: ${formatCurrency(
-          item.unitPrice
-        )} | Line Total: ${formatCurrency(item.lineTotal)}`
-      );
-    }
-    lines.push("");
-  }
-
-  if (detail.subscription) {
-    lines.push("Recurring Payment");
-    lines.push("------------------");
-    lines.push(`Product: ${detail.subscription.productName}`);
-    lines.push(`Billing Cycle: ${formatCycle(detail.subscription.billingCycle)}`);
-    lines.push(`Quantity: ${detail.subscription.quantity}`);
-    lines.push(`Subscription Status: ${detail.subscription.status}`);
-    lines.push(`Next Billing Date: ${new Date(detail.subscription.nextBillingDate).toLocaleDateString()}`);
-    lines.push("");
-  } else {
-    lines.push("Recurring Payment: N/A");
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
-function downloadTextFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
-}
-
 export function InvoiceDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -84,11 +23,20 @@ export function InvoiceDetail() {
   const [detail, setDetail] = useState<InvoiceDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isMarking, setIsMarking] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailResult, setEmailResult] = useState<{ previewUrl: string | null } | null>(null);
 
   useEffect(() => {
     if (!id || !isAllowed) return;
     getInvoiceDetail(id)
-      .then(setDetail)
+      .then((d) => {
+        setDetail(d);
+        if (d.customerEmail) setEmailAddress(d.customerEmail);
+      })
       .catch((err) =>
         setError(
           axios.isAxiosError(err) && err.response?.data?.message
@@ -119,9 +67,39 @@ export function InvoiceDetail() {
     }
   }
 
-  function handleDownloadSummary() {
-    if (!detail) return;
-    downloadTextFile(`${detail.invoiceNumber}-summary.txt`, buildSummaryText(detail));
+  async function handleDownloadPdf() {
+    if (!id || !detail) return;
+    setError(null);
+    setIsDownloading(true);
+    try {
+      await downloadInvoicePdf(id, `${detail.invoiceNumber}.pdf`);
+    } catch (err) {
+      setError(
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "Failed to download this invoice."
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  async function handleSendEmail() {
+    if (!id || !emailAddress.trim()) return;
+    setEmailError(null);
+    setEmailResult(null);
+    setIsSendingEmail(true);
+    try {
+      setEmailResult(await emailInvoice(id, emailAddress.trim()));
+    } catch (err) {
+      setEmailError(
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : "Failed to email this invoice."
+      );
+    } finally {
+      setIsSendingEmail(false);
+    }
   }
 
   if (error) {
@@ -258,10 +236,61 @@ export function InvoiceDetail() {
             {isMarking ? "Updating..." : "Mark as Paid"}
           </button>
         )}
-        <button className="sales-btn" onClick={handleDownloadSummary}>
-          Download Summary
+        <button className="sales-btn" onClick={handleDownloadPdf} disabled={isDownloading}>
+          {isDownloading ? "Downloading..." : "Download PDF"}
+        </button>
+        <button
+          className="sales-btn"
+          onClick={() => {
+            setShowEmailForm((v) => !v);
+            setEmailError(null);
+            setEmailResult(null);
+          }}
+        >
+          Email Invoice
         </button>
       </div>
+
+      {showEmailForm && (
+        <div className="sales-card">
+          <h2>Email Invoice to Customer</h2>
+          {emailError && <div className="banner-error">{emailError}</div>}
+          {emailResult && (
+            <div className="banner-success">
+              Invoice emailed to {emailAddress}.
+              {emailResult.previewUrl && (
+                <>
+                  {" "}
+                  No live mail server is configured, so this went to a test inbox instead of a real one —{" "}
+                  <a href={emailResult.previewUrl} target="_blank" rel="noreferrer">
+                    view the sent email
+                  </a>
+                  .
+                </>
+              )}
+            </div>
+          )}
+          <div className="product-search-row">
+            <input
+              type="email"
+              placeholder="customer@example.com"
+              value={emailAddress}
+              onChange={(e) => setEmailAddress(e.target.value)}
+              style={{ flex: 1, minWidth: 240 }}
+            />
+            <button
+              className="sales-btn sales-btn-primary"
+              onClick={handleSendEmail}
+              disabled={isSendingEmail || !emailAddress.trim()}
+            >
+              {isSendingEmail ? "Sending..." : "Send"}
+            </button>
+          </div>
+          <p className="explainer-text" style={{ margin: 0 }}>
+            Sends the same PDF as "Download PDF" as an attachment to the address above.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
